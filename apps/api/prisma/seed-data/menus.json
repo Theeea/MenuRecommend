@@ -1,0 +1,31 @@
+[
+  { "name": "김치찌개", "cuisine": "KOREAN", "dishType": "STEW" },
+  { "name": "된장찌개", "cuisine": "KOREAN", "dishType": "STEW" },
+  { "name": "비빔밥", "cuisine": "KOREAN", "dishType": "RICE" },
+  { "name": "불고기", "cuisine": "KOREAN", "dishType": "GRILL" },
+
+  { "name": "짜장면", "cuisine": "CHINESE", "dishType": "NOODLE" },
+  { "name": "짬뽕", "cuisine": "CHINESE", "dishType": "NOODLE" },
+  { "name": "탕수육", "cuisine": "CHINESE", "dishType": "FRIED" },
+
+  { "name": "초밥", "cuisine": "JAPANESE", "dishType": "RICE" },
+  { "name": "라멘", "cuisine": "JAPANESE", "dishType": "NOODLE" },
+  { "name": "돈카츠", "cuisine": "JAPANESE", "dishType": "FRIED" },
+
+  { "name": "파스타", "cuisine": "WESTERN", "dishType": "NOODLE" },
+  { "name": "피자", "cuisine": "WESTERN", "dishType": "BREAD" },
+  { "name": "스테이크", "cuisine": "WESTERN", "dishType": "GRILL" },
+
+  { "name": "쌀국수", "cuisine": "ASIAN", "dishType": "NOODLE" },
+  { "name": "팟타이", "cuisine": "ASIAN", "dishType": "NOODLE" },
+
+  { "name": "떡볶이", "cuisine": "SNACK", "dishType": "STIR_FRY" },
+  { "name": "순대", "cuisine": "SNACK", "dishType": "OTHER" },
+
+  { "name": "햄버거", "cuisine": "FASTFOOD", "dishType": "BREAD" },
+  { "name": "치킨너겟", "cuisine": "FASTFOOD", "dishType": "FRIED" },
+
+  { "name": "닭가슴살 샐러드", "cuisine": "SALAD", "dishType": "SALAD" },
+  { "name": "그릭요거트", "cuisine": "DESSERT", "dishType": "DESSERT" }
+]
+

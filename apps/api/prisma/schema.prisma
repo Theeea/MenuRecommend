@@ -1,0 +1,238 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Prisma 7: URL은 prisma.config.ts에서 관리
+}
+
+/**
+ * 메뉴 대카테고리(요리권역)
+ * - 필요하면 값 추가해서 확장 가능
+ */
+enum Cuisine {
+  KOREAN // 한식
+  CHINESE // 중식
+  JAPANESE // 일식
+  WESTERN // 양식
+  ASIAN // 동남아/아시아(비일식/비중식)
+  SNACK // 분식
+  FASTFOOD // 패스트푸드
+  SALAD // 샐러드/건강식
+  DESSERT // 디저트/간식
+  ETC // 기타
+}
+
+/**
+ * 메뉴 소카테고리(형태/조리군)
+ * - MVP 기준 최소값. 운영하면서 늘려도 됨.
+ */
+enum DishType {
+  RICE // 밥류
+  NOODLE // 면류
+  SOUP // 국/탕
+  STEW // 찌개/전골
+  GRILL // 구이
+  STIR_FRY // 볶음
+  FRIED // 튀김
+  SALAD // 샐러드
+  BREAD // 빵/샌드위치
+  DESSERT // 디저트
+  OTHER // 기타
+}
+
+/**
+ * 메뉴-재료 관계에서 재료 중요도
+ */
+enum IngredientRole {
+  MAIN
+  SUB
+  OPTIONAL
+}
+
+/**
+ * 재료 제거 가능 여부
+ */
+enum Removable {
+  YES
+  NO
+  UNKNOWN
+}
+
+/**
+ * 추천 세션 상태
+ */
+enum RecommendStatus {
+  RECOMMENDED // 추천됨(아직 수락 전)
+  ACCEPTED // 사용자가 수락
+  PROOF_SUBMITTED // 인증 업로드 완료
+  DONE // 성공 처리(포인트 지급 포함)
+  CANCELLED // 취소/만료
+}
+
+/**
+ * AI 인증 결과
+ */
+enum ProofResult {
+  PENDING
+  PASS
+  HOLD
+  FAIL
+}
+
+/**
+ * 관리자 역할(최소)
+ */
+enum AdminRole {
+  SUPER
+  REVIEWER
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  profile  UserProfile?
+  sessions RecommendSession[]
+  points   PointLedger[]
+
+  // 싫어하는 식재료(정규화)
+  dislikedIngredients UserDislikedIngredient[]
+}
+
+model UserProfile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // 추후 확장용(닉네임/성별/연령대 등 필요하면 추가)
+  // nickname String?
+}
+
+model Ingredient {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  menus      MenuIngredient[]
+  dislikedBy UserDislikedIngredient[]
+}
+
+model Menu {
+  id        String    @id @default(cuid())
+  name      String
+  cuisine   Cuisine
+  dishType  DishType?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  ingredients MenuIngredient[]
+  sessions    RecommendSession[]
+
+  @@unique([name, cuisine])
+  @@index([cuisine])
+  @@index([cuisine, dishType])
+}
+
+model MenuIngredient {
+  menuId       String
+  ingredientId String
+
+  role      IngredientRole
+  removable Removable      @default(UNKNOWN)
+  weight    Int            @default(1) // MAIN일수록 높게(예: 5)
+
+  menu       Menu       @relation(fields: [menuId], references: [id], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  @@id([menuId, ingredientId])
+  @@index([ingredientId])
+}
+
+model UserDislikedIngredient {
+  userId       String
+  ingredientId String
+  createdAt    DateTime @default(now())
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ingredient Ingredient @relation(fields: [ingredientId], references: [id], onDelete: Cascade)
+
+  @@id([userId, ingredientId])
+  @@index([ingredientId])
+}
+
+model RecommendSession {
+  id     String          @id @default(cuid())
+  userId String
+  menuId String
+  status RecommendStatus @default(RECOMMENDED)
+
+  createdAt  DateTime  @default(now())
+  acceptedAt DateTime?
+  doneAt     DateTime?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  menu Menu @relation(fields: [menuId], references: [id], onDelete: Restrict)
+
+  proof Proof?
+
+  @@index([userId, createdAt])
+  @@index([menuId, createdAt])
+}
+
+model Proof {
+  id        String @id @default(cuid())
+  sessionId String @unique
+
+  imageUrl String
+  aiScore  Float       @default(0)
+  aiResult ProofResult @default(PENDING)
+
+  // 운영/분석용(선택)
+  aiModel String?
+  aiMeta  Json?
+
+  createdAt  DateTime  @default(now())
+  reviewedAt DateTime?
+
+  reviewedByAdminId String?
+  reviewedByAdmin   AdminUser? @relation(fields: [reviewedByAdminId], references: [id], onDelete: SetNull)
+
+  session      RecommendSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  pointLedgers PointLedger[]
+
+  @@index([aiResult, createdAt])
+}
+
+model PointLedger {
+  id        String   @id @default(cuid())
+  userId    String
+  delta     Int
+  reason    String
+  createdAt DateTime @default(now())
+
+  // 어떤 인증으로 포인트가 지급/차감됐는지 연결(선택)
+  proofId String?
+  proof   Proof?  @relation(fields: [proofId], references: [id], onDelete: SetNull)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+}
+
+model AdminUser {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  password  String
+  role      AdminRole @default(REVIEWER)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  reviewedProofs Proof[]
+}
