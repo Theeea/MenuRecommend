@@ -1,7 +1,13 @@
 import "dotenv/config";
 
-// ✅ 중요: 폴더가 아니라 client 파일로 import 해야 함
-import { PrismaClient, Cuisine, DishType } from "../generated/prisma/client";
+// ✅ generated client import
+import {
+  PrismaClient,
+  Cuisine,
+  DishType,
+  IngredientRole,
+  Removable,
+} from "../generated/prisma/client";
 
 import fs from "fs";
 import path from "path";
@@ -13,16 +19,7 @@ if (!connectionString) {
   throw new Error("DATABASE_URL is missing. Check apps/api/.env");
 }
 
-// PrismaPg는 버전에 따라 (connectionString 객체) 또는 (pg Pool) 형태를 받는 케이스가 있어
-// 여기서는 공식/커뮤니티에서 널리 쓰는 connectionString 방식으로 시작하고,
-// 혹시 타입/런타임 에러나면 아래 주석된 Pool 방식으로 바꾸면 됨.
 const adapter = new PrismaPg({ connectionString });
-
-// (대안) Pool 방식이 필요한 버전이면 위 2줄 대신 아래로 교체
-// import { Pool } from "pg";
-// const pool = new Pool({ connectionString });
-// const adapter = new PrismaPg(pool);
-
 const prisma = new PrismaClient({ adapter });
 
 type MenuSeed = {
@@ -31,8 +28,45 @@ type MenuSeed = {
   dishType?: DishType | null;
 };
 
+type MenuIngredientSeedFile = Array<{
+  menu: { name: string; cuisine: Cuisine };
+  items: Array<{
+    ingredient: string;
+    role: string; // JSON에서는 문자열로 들어오므로 string으로 받고 변환
+    removable?: string; // 없으면 UNKNOWN 처리
+    weight?: number;
+  }>;
+}>;
+
 function readJson<T>(p: string): T {
   return JSON.parse(fs.readFileSync(p, "utf-8"));
+}
+
+/**
+ * Prisma enum object(예: IngredientRole, Removable)에 대해
+ * JSON 문자열을 안전하게 enum 값으로 변환
+ */
+function toEnumValue<T extends Record<string, string>>(
+  enumObj: T,
+  raw: unknown,
+  enumName: string,
+  fallback?: T[keyof T],
+): T[keyof T] {
+  const v = String(raw ?? "").trim().toUpperCase();
+  if (!v) {
+    if (fallback) return fallback;
+    throw new Error(`Missing enum value for ${enumName}`);
+  }
+
+  // enum 값이 "MAIN" 같은 형태로 들어오는 경우
+  const values = new Set(Object.values(enumObj));
+  if (values.has(v as any)) return v as any;
+
+  // 혹시 키로 들어오는 경우(enumObj["MAIN"] => "MAIN")
+  if ((enumObj as any)[v]) return (enumObj as any)[v];
+
+  if (fallback) return fallback;
+  throw new Error(`Invalid enum value for ${enumName}: ${v}`);
 }
 
 async function seedIngredients(ingredientNames: string[]) {
@@ -58,7 +92,7 @@ async function seedMenus(menus: MenuSeed[]) {
         ? null
         : m.dishType;
 
-    // ✅ 너가 선택한 @@unique([name, cuisine], name:"uniq_menu_name_cuisine") 기준
+    // ✅ @@unique([name, cuisine]) → 기본 compound unique key: name_cuisine
     await prisma.menu.upsert({
       where: {
         name_cuisine: { name, cuisine: m.cuisine },
@@ -75,10 +109,99 @@ async function seedMenus(menus: MenuSeed[]) {
   }
 }
 
+/**
+ * 메뉴-재료 매핑 시드
+ * - menu-ingredients.json을 읽어서 MenuIngredient upsert
+ * - JSON 문자열을 IngredientRole/Removable enum으로 변환
+ */
+async function seedMenuIngredients(rows: MenuIngredientSeedFile) {
+  // 🔥 성능/안정: 미리 id map 만들기(쿼리 N번 방지)
+  const [allMenus, allIngredients] = await Promise.all([
+    prisma.menu.findMany({ select: { id: true, name: true, cuisine: true } }),
+    prisma.ingredient.findMany({ select: { id: true, name: true } }),
+  ]);
+
+  const menuMap = new Map<string, string>();
+  for (const m of allMenus) {
+    menuMap.set(`${m.cuisine}::${m.name}`, m.id);
+  }
+
+  const ingMap = new Map<string, string>();
+  for (const i of allIngredients) {
+    ingMap.set(i.name, i.id);
+  }
+
+  let upserted = 0;
+
+  for (const row of rows) {
+    const menuName = String(row.menu?.name ?? "").trim();
+    const cuisine = row.menu?.cuisine;
+
+    if (!menuName || !cuisine) {
+      console.warn("⚠️ invalid menu row:", row?.menu);
+      continue;
+    }
+
+    const menuId = menuMap.get(`${cuisine}::${menuName}`);
+    if (!menuId) {
+      console.warn(`⚠️ menu not found: ${cuisine}/${menuName}`);
+      continue;
+    }
+
+    for (const item of row.items ?? []) {
+      const ingName = String(item?.ingredient ?? "").trim();
+      if (!ingName) continue;
+
+      const ingredientId = ingMap.get(ingName);
+      if (!ingredientId) {
+        console.warn(`⚠️ ingredient not found: ${ingName}`);
+        continue;
+      }
+
+      const role = toEnumValue(IngredientRole as any, item.role, "IngredientRole");
+      const removable = toEnumValue(
+        Removable as any,
+        item.removable ?? "UNKNOWN",
+        "Removable",
+        Removable.UNKNOWN as any,
+      );
+
+      const weight = Number.isFinite(item.weight) ? Number(item.weight) : 1;
+
+      // ✅ MenuIngredient에 @@unique([menuId, ingredientId]) 가 있어야 아래 where가 동작
+      await prisma.menuIngredient.upsert({
+        where: {
+          menuId_ingredientId: {
+            menuId,
+            ingredientId,
+          },
+        },
+        create: {
+          menuId,
+          ingredientId,
+          role,
+          removable,
+          weight,
+        },
+        update: {
+          role,
+          removable,
+          weight,
+        },
+      });
+
+      upserted++;
+    }
+  }
+
+  return { upserted };
+}
+
 async function main() {
   const baseDir = path.join(__dirname, "seed-data");
   const menusPath = path.join(baseDir, "menus.json");
   const ingredientsPath = path.join(baseDir, "ingredients.json");
+  const menuIngredientsPath = path.join(baseDir, "menu-ingredients.json");
 
   if (!fs.existsSync(menusPath)) throw new Error(`menus.json not found: ${menusPath}`);
   if (!fs.existsSync(ingredientsPath)) throw new Error(`ingredients.json not found: ${ingredientsPath}`);
@@ -91,9 +214,19 @@ async function main() {
   await seedIngredients(ingredientNames);
   await seedMenus(menus);
 
+  // ✅ 매핑 파일이 있으면 적용(없으면 스킵)
+  if (fs.existsSync(menuIngredientsPath)) {
+    const rows = readJson<MenuIngredientSeedFile>(menuIngredientsPath);
+    const r = await seedMenuIngredients(rows);
+    console.log(`✅ menu-ingredients seeded: ${r.upserted}`);
+  } else {
+    console.log(`ℹ️ menu-ingredients.json not found, skip mapping seed: ${menuIngredientsPath}`);
+  }
+
   console.log("✅ Seed done.", {
     menus: await prisma.menu.count(),
     ingredients: await prisma.ingredient.count(),
+    menuIngredients: await prisma.menuIngredient.count().catch(() => -1),
   });
 }
 

@@ -2,4 +2,13 @@ packages:
   - apps/*
   - packages/*
 
-nodeLinker: hoisted
+nodeLinker: isolated
+
+onlyBuiltDependencies:
+  - '@nestjs/core'
+  - '@prisma/engines'
+  - bcrypt
+  - esbuild
+  - prisma
+  - sharp
+  - unrs-resolver

@@ -1,24 +1,42 @@
-import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import { Stack } from 'expo-router';
-import { StatusBar } from 'expo-status-bar';
-import 'react-native-reanimated';
+import { Stack, useRouter, useSegments } from "expo-router";
+import React, { useEffect } from "react";
+import { SafeAreaProvider } from "react-native-safe-area-context";
+import { AuthProvider, useAuth } from "../src/auth/authStore";
 
-import { useColorScheme } from '@/hooks/use-color-scheme';
+function AuthGate({ children }: { children: React.ReactNode }) {
+    const { token, loading } = useAuth();
+    const segments = useSegments();
+    const router = useRouter();
 
-export const unstable_settings = {
-  anchor: '(tabs)',
-};
+    useEffect(() => {
+        if (loading) return;
+
+        const first = segments[0]; // e.g. "(tabs)", "login"
+        const inAuthScreen = first === "login" || first === "register";
+
+        if (!token && !inAuthScreen) router.replace("/login");
+        if (token && inAuthScreen) router.replace("/(tabs)");
+    }, [token, loading, segments.join("/")]);
+
+    return <>{children}</>;
+}
 
 export default function RootLayout() {
-  const colorScheme = useColorScheme();
-
-  return (
-    <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Modal' }} />
-      </Stack>
-      <StatusBar style="auto" />
-    </ThemeProvider>
-  );
+    return (
+        <SafeAreaProvider>
+            <AuthProvider>
+                <AuthGate>
+                    <Stack screenOptions={{ headerShown: false }}>
+                        <Stack.Screen name="(tabs)" />
+                        <Stack.Screen name="login" />
+                        <Stack.Screen name="register" />
+                        <Stack.Screen
+                            name="proof"
+                            options={{ headerShown: true, title: "인증" }}
+                        />
+                    </Stack>
+                </AuthGate>
+            </AuthProvider>
+        </SafeAreaProvider>
+    );
 }

@@ -1,0 +1,21 @@
+[
+  {
+    "menu": { "name": "짬뽕", "cuisine": "CHINESE" },
+    "items": [
+      { "ingredient": "오이", "role": "OPTIONAL", "removable": "YES", "weight": 1 },
+      { "ingredient": "조개", "role": "SUB", "removable": "NO", "weight": 3 }
+    ]
+  },
+  {
+    "menu": { "name": "새송이버섯볶음", "cuisine": "KOREAN" },
+    "items": [
+      { "ingredient": "버섯", "role": "MAIN", "removable": "NO", "weight": 5 }
+    ]
+  },
+  {
+    "menu": { "name": "냉면", "cuisine": "KOREAN" },
+    "items": [
+      { "ingredient": "오이", "role": "OPTIONAL", "removable": "YES", "weight": 1 }
+    ]
+  }
+]
