@@ -1,29 +1,39 @@
-import { Body, Controller, Delete, Get, Param, Post, Req, UseGuards } from "@nestjs/common";
+import { Controller, Delete, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
+import { CurrentUserId } from "../common/security/current-user-id.decorator";
 import { BlockedMenusService } from "./blocked-menus.service";
 
-@UseGuards(AuthGuard("jwt"))
 @Controller("me/blocked-menus")
+@UseGuards(AuthGuard("jwt"))
 export class BlockedMenusController {
-  constructor(private service: BlockedMenusService) {}
+  constructor(private readonly service: BlockedMenusService) {}
 
+  // 내 싫어요(차단) 목록 조회
   @Get()
-  list(@Req() req: any) {
-    return this.service.list(req.user.userId);
+  async list(
+    @CurrentUserId() userId: string,
+    @Query("take") take?: string,
+    @Query("cursor") cursor?: string
+  ) {
+    const n = Math.min(Math.max(parseInt(take || "30", 10), 1), 100);
+    return await this.service.list(userId, { take: n, cursor: cursor || null });
   }
 
-  @Post()
-  add(@Req() req: any, @Body() body: { menuId: string }) {
-    return this.service.add(req.user.userId, body.menuId);
+  // 싫어요(차단) 추가
+  @Post(":menuId")
+  async add(@CurrentUserId() userId: string, @Param("menuId") menuId: string) {
+    return await this.service.add(userId, menuId);
   }
 
+  // 싫어요(차단) 해제(단일 삭제)
   @Delete(":menuId")
-  remove(@Req() req: any, @Param("menuId") menuId: string) {
-    return this.service.remove(req.user.userId, menuId);
+  async remove(@CurrentUserId() userId: string, @Param("menuId") menuId: string) {
+    return await this.service.remove(userId, menuId);
   }
 
+  // 싫어요(차단) 전체 초기화
   @Delete()
-  clear(@Req() req: any) {
-    return this.service.clear(req.user.userId);
+  async reset(@CurrentUserId() userId: string) {
+    return await this.service.reset(userId);
   }
 }
