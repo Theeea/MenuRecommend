@@ -27,7 +27,7 @@ function toast(msg: string) {
 
 export default function IngredientsScreen() {
     // ✅ 너희 authStore에서 token 키가 다르면 여기만 바꾸면 됨
-    const token = useAuth((s) => s.token);
+    const { token } = useAuth();
 
     // ✅ getState()로 읽으면 UI가 갱신 안 될 수 있어서 "selector 구독"으로 가져옴
     const selectedIds = useIngredientsStore((s) => s.selectedIngredientIds);

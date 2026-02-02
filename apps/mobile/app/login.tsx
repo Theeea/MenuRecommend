@@ -3,7 +3,7 @@ import { View, Text, TextInput, Pressable, ActivityIndicator, Alert } from "reac
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import * as Haptics from "expo-haptics";
-import { apiPost } from "../src/api/client";
+import { api } from "../src/api/client";
 import { useAuth } from "../src/auth/authStore";
 
 export default function LoginScreen() {
@@ -18,10 +18,10 @@ export default function LoginScreen() {
         setBusy(true);
         try {
             await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-            const res = await apiPost<any>("/auth/login", { email, password });
-            if (!res?.accessToken) throw new Error("no token");
+            const { data } = await api.post("/auth/login", { email, password });
+            if (!data?.accessToken) throw new Error("no token");
 
-            await signIn(res.accessToken);
+            await signIn(data.accessToken);
             await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             router.replace("/(tabs)");
         } catch {
