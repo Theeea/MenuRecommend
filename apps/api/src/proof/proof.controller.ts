@@ -1,30 +1,66 @@
-import { BadRequestException, Body, Controller, Post, Req, UseGuards, Headers, Param } from "@nestjs/common";
-import { AuthGuard } from "@nestjs/passport";
-import { ProofService } from "./proof.service";
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  Headers as ReqHeaders,
+  Param,
+  Post,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+import { ProofService } from './proof.service';
 
-@Controller("proofs")
+@Controller('proofs')
 export class ProofController {
-  constructor(private service: ProofService) {}
+  constructor(private readonly service: ProofService) {}
 
-  // ✅ 즉시 저장 + PENDING 반환
-  @UseGuards(AuthGuard("jwt"))
+  /**
+   * ✅ 업로드(워터마크 합성) 이후 "검증 큐"에 등록
+   * - imageUrl: /uploads/proof/xxx.jpg (워터마크 결과)
+   * - rawUrl:   /uploads/raw/xxx.jpg   (원본/정규화본)
+   */
+  @UseGuards(AuthGuard('jwt'))
   @Post()
-  async create(
+  createQueued(
     @Req() req: any,
-    @Body() body: { sessionId: string; imageUrl: string; rawUrl: string; challengeCode?: string }
+    @Body()
+    body: {
+      sessionId: string;
+      imageUrl: string;
+      rawUrl: string;
+      challengeCode?: string;
+    },
   ) {
-    if (!body?.sessionId || !body?.imageUrl || !body?.rawUrl) {
-      throw new BadRequestException("sessionId, imageUrl, rawUrl required");
-    }
-    return this.service.createQueued(req.user.userId, body.sessionId, body.imageUrl, body.rawUrl, body.challengeCode);
+    if (!body?.sessionId)
+      throw new BadRequestException('sessionId is required');
+    if (!body?.imageUrl) throw new BadRequestException('imageUrl is required');
+    if (!body?.rawUrl) throw new BadRequestException('rawUrl is required');
+
+    return this.service.createQueued(
+      req.user.userId,
+      body.sessionId,
+      body.imageUrl,
+      body.rawUrl,
+      body.challengeCode,
+    );
   }
 
-  // ✅ 운영자 수동 리뷰(기존 유지)
-  @Post(":id/review")
-  async review(
-    @Param("id") proofId: string,
-    @Body() body: { result: "PASS" | "FAIL"; score?: number; model?: string; meta?: any },
-    @Headers("x-admin-key") adminKey?: string
+  /**
+   * ✅ 관리자 수동 PASS/FAIL (admin 페이지에서 호출)
+   * 헤더: x-admin-key
+   */
+  @Post(':id/review')
+  review(
+    @Param('id') proofId: string,
+    @Body()
+    body: {
+      result: 'PASS' | 'FAIL';
+      score?: number;
+      model?: string;
+      meta?: any;
+    },
+    @ReqHeaders('x-admin-key') adminKey?: string,
   ) {
     return this.service.reviewByAdminKey(adminKey, proofId, body);
   }
