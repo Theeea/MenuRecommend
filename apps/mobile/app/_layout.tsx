@@ -32,7 +32,7 @@ export default function RootLayout() {
                         <Stack.Screen name="register" />
                         <Stack.Screen
                             name="proof"
-                            options={{ headerShown: true, title: "인증" }}
+                            options={{ headerShown: false, title: "인증" }}
                         />
                     </Stack>
                 </AuthGate>
