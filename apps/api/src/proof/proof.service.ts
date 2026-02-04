@@ -1,11 +1,13 @@
 import {
   BadRequestException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Injectable,
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { Prisma, ProofResult, RecommendStatus } from '@prisma/client';
+import { Prisma, ProofResult, RecommendStatus } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { existsSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
@@ -30,6 +32,18 @@ type QrParsed = {
   sig: string;
 };
 
+function getStartOfKstDayUtc(now = new Date()) {
+  const kstOffsetMs = 9 * 60 * 60 * 1000;
+  const kst = new Date(now.getTime() + kstOffsetMs);
+  kst.setHours(0, 0, 0, 0);
+  return new Date(kst.getTime() - kstOffsetMs);
+}
+
+function envInt(name: string, fallback: number) {
+  const n = Number(process.env[name]);
+  return Number.isFinite(n) ? Math.trunc(n) : fallback;
+}
+
 function assertAdminKey(headerKey?: string) {
   const key = process.env.ADMIN_REVIEW_KEY ?? 'dev-admin';
   if (!headerKey || headerKey !== key) {
@@ -50,6 +64,11 @@ export class ProofService {
   /**
    * ✅ 업로드 완료 후 "AI/수동 리뷰 대기"로 큐잉
    * - 빠르게 응답(=OpenAI 안 기다림)
+   *
+   * 정책(서버 강제):
+   * - (선택) PENDING이 있으면 신규 업로드 차단
+   * - 3시간 쿨타임
+   * - 일일 3회(KST)
    */
   async createQueued(
     userId: string,
@@ -72,8 +91,7 @@ export class ProofService {
     });
 
     if (!session) throw new NotFoundException('Session not found');
-    if (session.userId !== userId)
-      throw new ForbiddenException('Not your session');
+    if (session.userId !== userId) throw new ForbiddenException('Not your session');
 
     // ACCEPTED(추천 수락) 이후에만 인증 가능(이미 제출된 세션은 재호출 idempotent 허용)
     if (
@@ -85,12 +103,14 @@ export class ProofService {
       );
     }
 
-    // challengeCode 검증(있으면 맞춰야 함)
-    if (
-      session.challengeCode &&
-      challengeCode &&
-      session.challengeCode !== challengeCode
-    ) {
+    // challengeCode 검증(세션에 있으면 반드시 일치)
+    if (!session.challengeCode) {
+      throw new BadRequestException('challengeCode missing on session');
+    }
+    if (!challengeCode) {
+      throw new BadRequestException('challengeCode is required');
+    }
+    if (session.challengeCode !== challengeCode) {
       throw new BadRequestException('challengeCode mismatch');
     }
 
@@ -112,6 +132,73 @@ export class ProofService {
         return { proof: exists, queued: false };
       }
 
+      // ✅ 업로드/큐잉 정책: 하루 제한 + 쿨타임 + (선택) PENDING 중복 방지
+      const dailyLimit = envInt('PROOF_DAILY_LIMIT', 3);
+      const cooldownHours = envInt('PROOF_COOLDOWN_HOURS', 3);
+      const cooldownMs = Math.max(0, cooldownHours) * 60 * 60 * 1000;
+      const blockWhilePending = (process.env.PROOF_BLOCK_WHILE_PENDING ?? '1') !== '0';
+
+      // (1) PENDING이 있으면 신규 업로드 차단
+      if (blockWhilePending) {
+        const pending = await tx.proof.findFirst({
+          where: { aiResult: ProofResult.PENDING, session: { userId } },
+          select: { id: true, sessionId: true, createdAt: true },
+          orderBy: { createdAt: 'desc' },
+        });
+        if (pending) {
+          throw new HttpException(
+            {
+              code: 'PROOF_PENDING',
+              message: '현재 인증이 검토중입니다. 결과가 나올 때까지 기다려 주세요.',
+              pending,
+            },
+            HttpStatus.TOO_MANY_REQUESTS,
+          );
+        }
+      }
+
+      // (2) 쿨타임(기본 3시간)
+      if (cooldownMs > 0) {
+        const last = await tx.proof.findFirst({
+          where: { session: { userId } },
+          orderBy: { createdAt: 'desc' },
+          select: { createdAt: true },
+        });
+        if (last) {
+          const diff = Date.now() - new Date(last.createdAt).getTime();
+          if (diff >= 0 && diff < cooldownMs) {
+            const retryAfterSeconds = Math.ceil((cooldownMs - diff) / 1000);
+            throw new HttpException(
+              {
+                code: 'PROOF_COOLDOWN',
+                message: `인증은 ${cooldownHours}시간 쿨타임이 있어요. 잠시 후 다시 시도해 주세요.`,
+                retryAfterSeconds,
+                nextAllowedAt: new Date(Date.now() + retryAfterSeconds * 1000).toISOString(),
+              },
+              HttpStatus.TOO_MANY_REQUESTS,
+            );
+          }
+        }
+      }
+
+      // (3) 일일 제한(KST 기준, 기본 3회)
+      if (dailyLimit > 0) {
+        const start = getStartOfKstDayUtc();
+        const todayCount = await tx.proof.count({
+          where: { createdAt: { gte: start }, session: { userId } },
+        });
+        if (todayCount >= dailyLimit) {
+          throw new HttpException(
+            {
+              code: 'PROOF_DAILY_LIMIT',
+              message: `오늘 인증 가능 횟수(${dailyLimit}회)를 모두 사용했어요.`,
+              kstDayStartUtc: start.toISOString(),
+            },
+            HttpStatus.TOO_MANY_REQUESTS,
+          );
+        }
+      }
+
       const proof = await tx.proof.create({
         data: {
           sessionId: sid,
@@ -121,7 +208,9 @@ export class ProofService {
           aiModel: null,
           aiMeta: {
             rawUrl: raw,
+            challengeCode,
             queuedAt: new Date().toISOString(),
+            processingAt: null,
           },
         },
         select: {
@@ -142,85 +231,77 @@ export class ProofService {
       return { proof, queued: true };
     });
 
-    return { ok: true, ...created };
+    return created;
   }
 
   /**
-   * ✅ 관리자 수동 리뷰 (admin page -> /proofs/:id/review)
-   * PASS면 보너스 지급 + 세션 DONE 처리
+   * ✅ 관리자 수동 PASS/FAIL
    */
   async reviewByAdminKey(
     adminKey: string | undefined,
-    proofId: string,
-    body: {
-      result: 'PASS' | 'FAIL';
-      score?: number;
-      model?: string;
-      meta?: any;
-    },
+    id: string,
+    body: { result: 'PASS' | 'FAIL'; score?: number; model?: string; meta?: any },
   ) {
     assertAdminKey(adminKey);
 
-    const id = (proofId ?? '').trim();
-    if (!id) throw new BadRequestException('proofId required');
-
     const result = body?.result;
     if (result !== 'PASS' && result !== 'FAIL') {
-      throw new BadRequestException('result must be PASS or FAIL');
+      throw new BadRequestException('result must be PASS|FAIL');
     }
 
-    const proof = await this.prisma.proof.findUnique({
+    const score =
+      body?.score != null && Number.isFinite(Number(body.score))
+        ? Math.max(0, Math.min(100, Number(body.score)))
+        : undefined;
+
+    const p = await this.prisma.proof.findUnique({
       where: { id },
-      include: { session: { include: { menu: true } } },
+      include: { session: true },
     });
 
-    if (!proof) throw new NotFoundException('Proof not found');
-
-    const score = Number.isFinite(Number(body?.score))
-      ? Number(body?.score)
-      : (proof.aiScore ?? 0);
+    if (!p) throw new NotFoundException('Proof not found');
 
     const updated = await this.prisma.$transaction(async (tx) => {
-      const p = await tx.proof.update({
+      const meta = (p.aiMeta as any) ?? {};
+      const nextMeta = {
+        ...meta,
+        ...(body?.meta ? { adminMeta: body.meta } : {}),
+        processingAt: null,
+        processedAt: new Date().toISOString(),
+      };
+
+      const updatedProof = await tx.proof.update({
         where: { id },
         data: {
           aiResult: result as any,
-          aiScore: score,
-          aiModel: body?.model ?? proof.aiModel ?? null,
-          aiMeta: {
-            ...(proof.aiMeta as any),
-            ...(body?.meta ?? {}),
-            reviewedBy: 'ADMIN_KEY',
-            reviewedAt: new Date().toISOString(),
-          },
+          ...(score != null ? { aiScore: score } : {}),
+          aiModel: body?.model ?? p.aiModel ?? null,
+          aiMeta: nextMeta,
           reviewedAt: new Date(),
         },
+        select: { id: true, aiResult: true, aiScore: true },
       });
 
       // 세션 DONE 처리(성공/실패 모두 "리뷰 완료" 의미)
       await tx.recommendSession.update({
-        where: { id: proof.sessionId },
+        where: { id: p.sessionId },
         data: { status: 'DONE' as any, doneAt: new Date() },
       });
 
       // PASS면 보너스(중복 방지)
       let bonus: any = null;
       if (result === 'PASS') {
-        bonus = await this.givePassBonus(proof.session.userId, proof.id, tx);
+        bonus = await this.givePassBonus(p.session.userId, p.id, tx);
       }
 
-      return { p, bonus };
+      return { p: updatedProof, bonus };
     });
 
-    return { ok: true, id, result, score, bonus: updated.bonus };
+    return { ok: true, id, result, score: updated.p.aiScore, bonus: updated.bonus };
   }
 
   /**
    * ✅ 크론에서 PENDING만 가져와서 처리
-   * - QR decode + HMAC 검증 (가능하면)
-   * - OpenAI Vision 판정
-   * - PASS면 포인트 지급 + 세션 DONE
-   * - 실패/오류는 HOLD로 넘겨 관리자 리뷰
    */
   async processPendingBatch(limit = 5) {
     const targets = await this.prisma.proof.findMany({
@@ -236,9 +317,7 @@ export class ProofService {
                 name: true,
                 cuisine: true,
                 dishType: true,
-                ingredients: {
-                  include: { ingredient: { select: { name: true } } },
-                },
+                ingredients: { include: { ingredient: { select: { name: true } } } },
               },
             },
           },
@@ -251,9 +330,17 @@ export class ProofService {
     for (const proof of targets) {
       try {
         const meta = (proof.aiMeta as any) ?? {};
+
+        // 진행중 표시(어드민에서 'AI 진행중' 배지로 사용)
+        meta.processingAt = new Date().toISOString();
+        meta.processingBy = 'proof:ai';
+        await this.prisma.proof.update({
+          where: { id: proof.id },
+          data: { aiMeta: { ...meta } },
+        });
+
         const rawUrl = meta.rawUrl as string | undefined;
 
-        // rawUrl 없으면 AI 판독 불가 → HOLD
         if (!rawUrl) {
           await this.prisma.proof.update({
             where: { id: proof.id },
@@ -265,15 +352,13 @@ export class ProofService {
                 openaiError:
                   'rawUrl missing in aiMeta (legacy proof). Need manual review.',
                 lastErrorAt: new Date().toISOString(),
+                processingAt: null,
+                processedAt: new Date().toISOString(),
               },
             },
           });
 
-          results.push({
-            id: proof.id,
-            error: 'rawUrl missing in aiMeta',
-            held: true,
-          });
+          results.push({ id: proof.id, error: 'rawUrl missing in aiMeta', held: true });
           continue;
         }
 
@@ -296,6 +381,8 @@ export class ProofService {
                 qr: qrCheck.qr ?? null,
                 qrError: qrCheck.error,
                 lastErrorAt: new Date().toISOString(),
+                processingAt: null,
+                processedAt: new Date().toISOString(),
               },
             },
           });
@@ -313,9 +400,7 @@ export class ProofService {
             dishType: proof.session.menu.dishType
               ? String(proof.session.menu.dishType)
               : null,
-            ingredients: this.pickMainIngredients(
-              proof.session.menu.ingredients,
-            ),
+            ingredients: this.pickMainIngredients(proof.session.menu.ingredients),
           },
         });
 
@@ -333,20 +418,17 @@ export class ProofService {
               ...(qrCheck?.qr ? { qr: qrCheck.qr } : {}),
               openai: ai,
               attempts: Number(meta.attempts ?? 0) + 1,
+              processingAt: null,
+              processedAt: new Date().toISOString(),
             },
-            reviewedAt:
-              result === 'PASS' || result === 'FAIL' ? new Date() : null,
+            reviewedAt: result === 'PASS' || result === 'FAIL' ? new Date() : null,
           },
         });
 
         // 4) PASS면 보너스 + 세션 DONE
         if (result === 'PASS') {
           const bonus = await this.prisma.$transaction(async (tx) => {
-            const b = await this.givePassBonus(
-              proof.session.userId,
-              updated.id,
-              tx,
-            );
+            const b = await this.givePassBonus(proof.session.userId, updated.id, tx);
             await tx.recommendSession.update({
               where: { id: proof.sessionId },
               data: { status: 'DONE' as any, doneAt: new Date() },
@@ -356,81 +438,60 @@ export class ProofService {
 
           results.push({ id: proof.id, result, score, bonus });
         } else if (result === 'FAIL') {
-          // FAIL도 리뷰 완료로 간주 → 세션 DONE
           await this.prisma.recommendSession.update({
             where: { id: proof.sessionId },
             data: { status: 'DONE' as any, doneAt: new Date() },
           });
-
           results.push({ id: proof.id, result, score });
         } else {
-          // HOLD는 관리자 리뷰 대기
           results.push({ id: proof.id, result, score });
         }
       } catch (e: any) {
         const meta = (proof.aiMeta as any) ?? {};
         const msg = String(e?.message ?? e);
 
-        // 쿼터(429)면 HOLD로 고정
         const isQuota = msg.includes('exceeded your current quota');
-
-        // 파일 미존재도 HOLD (관리자 리뷰/데이터 정리 대상)
         const isMissingFile = msg.includes('file not found:');
 
         await this.prisma.proof.update({
           where: { id: proof.id },
           data: {
-            aiResult: (isQuota || isMissingFile ? 'HOLD' : 'PENDING') as any,
+            aiResult: 'HOLD' as any,
             aiModel: process.env.OPENAI_VISION_MODEL ?? 'gpt-4.1-mini',
             aiMeta: {
-              ...(meta ?? {}),
+              ...meta,
               openaiError: msg,
-              attempts: Number(meta.attempts ?? 0) + 1,
+              quota: isQuota ? true : undefined,
+              missingFile: isMissingFile ? true : undefined,
               lastErrorAt: new Date().toISOString(),
+              processingAt: null,
+              processedAt: new Date().toISOString(),
             },
           },
         });
 
-        results.push({
-          id: proof.id,
-          error: msg,
-          held: isQuota || isMissingFile,
-        });
+        results.push({ id: proof.id, error: msg, held: true });
       }
     }
 
     return { ok: true, processed: results.length, results };
   }
 
-  // -----------------------------
-  // OpenAI Vision
-  // -----------------------------
   private async judgeFoodWithOpenAI(args: {
     rawUrl: string;
-    expected: {
-      menuName: string;
-      cuisine: string;
-      dishType: string | null;
-      ingredients: string[];
-    };
-  }): Promise<AiDecision> {
+    expected: { menuName: string; cuisine: string; dishType: string | null; ingredients: string[] };
+  }) {
     const model = process.env.OPENAI_VISION_MODEL ?? 'gpt-4.1-mini';
 
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY missing');
+    const localPath = this.uploadsUrlToLocalPath(args.rawUrl);
+    if (!existsSync(localPath)) {
+      throw new Error(`file not found: ${localPath}`);
     }
 
-    const rawPath = this.uploadsUrlToLocalPath(args.rawUrl);
-    if (!existsSync(rawPath)) {
-      throw new Error(`file not found: ${rawPath}`);
-    }
+    const buf = readFileSync(localPath);
 
-    const jpg = await sharp(readFileSync(rawPath))
-      .rotate()
-      .resize({ width: 768, withoutEnlargement: true })
-      .jpeg({ quality: 82 })
-      .toBuffer();
-
+    // 너무 큰 파일은 축소
+    const jpg = await sharp(buf).rotate().resize({ width: 768, withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
     const dataUrl = `data:image/jpeg;base64,${jpg.toString('base64')}`;
 
     const ing = args.expected.ingredients.length
@@ -443,9 +504,7 @@ export class ProofService {
 
 [기대 메뉴]
 - 메뉴명: ${args.expected.menuName}
-- 카테고리: ${args.expected.cuisine}${
-      args.expected.dishType ? ` / ${args.expected.dishType}` : ''
-    }
+- 카테고리: ${args.expected.cuisine}${args.expected.dishType ? ` / ${args.expected.dishType}` : ''}
 - ${ing}
 
 판정 규칙:
@@ -489,61 +548,42 @@ export class ProofService {
 
     const parsed = JSON.parse(res.output_text) as AiDecision;
 
-    parsed.confidence = Math.max(
-      0,
-      Math.min(1, Number(parsed.confidence ?? 0)),
-    );
-    parsed.detected = Array.isArray(parsed.detected)
-      ? parsed.detected.map(String)
-      : [];
+    parsed.confidence = Math.max(0, Math.min(1, Number(parsed.confidence ?? 0)));
+    parsed.detected = Array.isArray(parsed.detected) ? parsed.detected.map(String) : [];
     parsed.reason = String(parsed.reason ?? '');
     parsed.match = Boolean(parsed.match);
 
     return parsed;
   }
 
-  private toProofResult(ai: AiDecision): {
-    result: ProofResult | 'HOLD';
-    score: number;
-  } {
+  private toProofResult(ai: AiDecision): { result: ProofResult | 'HOLD'; score: number } {
     const conf = Math.max(0, Math.min(1, Number(ai?.confidence ?? 0)));
-    // score는 0~100 변환
     const score = Math.round(conf * 100);
 
-    // ✅ 기준은 보수적으로
-    // - match=true & conf>=0.75 => PASS
-    // - match=false & conf>=0.80 => FAIL
-    // - 그 외 => HOLD(관리자 리뷰)
     if (ai.match && conf >= 0.75) return { result: 'PASS' as any, score };
     if (!ai.match && conf >= 0.8) return { result: 'FAIL' as any, score };
     return { result: 'HOLD' as any, score };
   }
 
-  // -----------------------------
-  // QR decode + HMAC verify
-  // -----------------------------
   private async tryVerifyQrFromProofImage(
     proofImageUrl: string,
     expectedSessionId: string,
     expectedChallengeCode: string | null,
-  ): Promise<
-    { ok: true; qr: any } | { ok: false; error: string; qr?: any } | null
-  > {
-    try {
-      // expectedChallengeCode가 없으면 QR 검증 의미 없음
-      if (!expectedChallengeCode) return null;
+  ): Promise<{ ok: true; qr: any } | { ok: false; error: string; qr?: any } | null> {
+    if (!expectedChallengeCode) return null;
 
+    try {
       const localPath = this.uploadsUrlToLocalPath(proofImageUrl);
       if (!existsSync(localPath)) {
         return { ok: false, error: `proof image file not found: ${localPath}` };
       }
 
-      // QR decoding (resize 후 raw rgba)
-      const { data, info } = await sharp(readFileSync(localPath))
+      const buf = readFileSync(localPath);
+      const { data, info } = await sharp(buf)
         .rotate()
-        .resize({ width: 720, withoutEnlargement: true })
-        .raw()
+        .resize({ width: 1024, withoutEnlargement: true })
         .ensureAlpha()
+        .raw()
         .toBuffer({ resolveWithObject: true });
 
       const code = jsQR(new Uint8ClampedArray(data), info.width, info.height);
@@ -554,40 +594,20 @@ export class ProofService {
 
       const parsed = this.parseQrPayload(code.data);
 
-      // payload 형태가 다르면 HOLD
       if (!parsed) {
-        return {
-          ok: false,
-          error: 'QR payload invalid format',
-          qr: { payload: code.data },
-        };
+        return { ok: false, error: 'QR payload invalid format', qr: { payload: code.data } };
       }
 
-      // sessionId / code 일치 체크
       if (parsed.sessionId !== expectedSessionId) {
-        return {
-          ok: false,
-          error: 'QR sessionId mismatch',
-          qr: parsed,
-        };
+        return { ok: false, error: 'QR sessionId mismatch', qr: parsed };
       }
 
       if (parsed.code !== expectedChallengeCode) {
-        return {
-          ok: false,
-          error: 'QR challengeCode mismatch',
-          qr: parsed,
-        };
+        return { ok: false, error: 'QR challengeCode mismatch', qr: parsed };
       }
 
-      // HMAC verify
       const secret = process.env.PROOF_QR_SECRET ?? 'dev-proof-qr-secret';
-      const expectedSig = this.signQr(
-        secret,
-        parsed.sessionId,
-        parsed.code,
-        parsed.ts,
-      );
+      const expectedSig = this.signQr(secret, parsed.sessionId, parsed.code, parsed.ts);
 
       const a = Buffer.from(expectedSig, 'utf8');
       const b = Buffer.from(parsed.sig, 'utf8');
@@ -604,7 +624,6 @@ export class ProofService {
   }
 
   private parseQrPayload(payload: string): QrParsed | null {
-    // MR1|<sid>|<code>|<ts>|<sig>
     const s = String(payload ?? '').trim();
     const parts = s.split('|');
     if (parts.length !== 5) return null;
@@ -619,31 +638,24 @@ export class ProofService {
   }
 
   private signQr(secret: string, sessionId: string, code: string, ts: number) {
-    // QR 과도하게 길어지면 스캔이 불안정해서 16자리만 사용
     return createHmac('sha256', secret)
       .update(`${sessionId}|${code}|${ts}`)
       .digest('hex')
       .slice(0, 16);
   }
 
-  // -----------------------------
-  // Helpers
-  // -----------------------------
   private uploadsUrlToLocalPath(u: string) {
     const s = String(u ?? '').trim();
     if (!s) throw new Error('empty url');
 
-    // 절대 URL이면 pathname만 사용
     let pathname = s;
     if (s.startsWith('http://') || s.startsWith('https://')) {
       pathname = new URL(s).pathname;
     }
 
-    // /uploads/... -> <cwd>/uploads/...
     const rel = pathname.replace(/^\//, '');
     const full = resolve(join(process.cwd(), rel));
 
-    // 보안: uploads 밖으로 나가지 않도록
     const uploadsRoot = resolve(join(process.cwd(), 'uploads'));
     if (!full.startsWith(uploadsRoot)) {
       throw new Error(`invalid uploads path: ${full}`);
@@ -659,7 +671,6 @@ export class ProofService {
       .filter(Boolean)
       .map(String);
 
-    // 중복 제거 + 최대 6개
     return [...new Set(names)].slice(0, 6);
   }
 
@@ -673,19 +684,13 @@ export class ProofService {
 
     const dedupeKey = `PROOF:PASS:${proofId}`;
 
-    // 이미 지급됐는지 체크
     const existing = await tx.pointLedger.findUnique({
       where: { dedupeKey },
       select: { id: true, balanceAfter: true, points: true },
     });
 
     if (existing) {
-      return {
-        ok: true,
-        earned: 0,
-        balanceAfter: existing.balanceAfter,
-        deduped: true,
-      };
+      return { ok: true, earned: 0, balanceAfter: existing.balanceAfter, deduped: true };
     }
 
     const user = await tx.user.findUnique({

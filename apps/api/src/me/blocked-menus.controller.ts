@@ -3,6 +3,13 @@ import { AuthGuard } from "@nestjs/passport";
 import { CurrentUserId } from "../common/security/current-user-id.decorator";
 import { BlockedMenusService } from "./blocked-menus.service";
 
+function parseTake(v?: string, fallback = 30) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  const t = Math.trunc(n);
+  return Math.min(Math.max(t, 1), 100);
+}
+
 @Controller("me/blocked-menus")
 @UseGuards(AuthGuard("jwt"))
 export class BlockedMenusController {
@@ -15,8 +22,9 @@ export class BlockedMenusController {
     @Query("take") take?: string,
     @Query("cursor") cursor?: string
   ) {
-    const n = Math.min(Math.max(parseInt(take || "30", 10), 1), 100);
-    return await this.service.list(userId, { take: n, cursor: cursor || null });
+    const n = parseTake(take, 30);
+    const c = cursor?.trim() ? cursor.trim() : null;
+    return await this.service.list(userId, { take: n, cursor: c });
   }
 
   // 싫어요(차단) 추가

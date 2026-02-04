@@ -77,6 +77,7 @@ export class AdminController {
   // -------------------- PAGES --------------------
 
   // 관리자 Proof 리뷰 페이지
+  // 관리자 Proof 리뷰 페이지
   @Get('review')
   reviewPage() {
     const html = `
@@ -104,7 +105,7 @@ export class AdminController {
     .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:center;background:#fff;border:1px solid #eee;border-radius:16px;padding:12px}
     .grid{display:grid;grid-template-columns:1fr;gap:12px;margin-top:12px}
     .card{background:#fff;border:1px solid #eee;border-radius:16px;padding:12px;display:grid;grid-template-columns:360px 1fr;gap:14px}
-    img{width:360px;height:360px;object-fit:cover;border-radius:14px;background:#f2f2f2}
+    img{width:360px;height:360px;object-fit:cover;border-radius:14px;background:#f2f2f2;cursor:zoom-in}
     .meta{display:flex;flex-direction:column;gap:8px}
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
     .pill{padding:6px 10px;border-radius:999px;background:#f1f1f1;font-weight:800}
@@ -118,182 +119,216 @@ export class AdminController {
     .actions button.fail{background:#c62828}
     pre{white-space:pre-wrap;background:#fafafa;border:1px solid #eee;border-radius:12px;padding:10px;margin:0;max-height:220px;overflow:auto}
     .pager{display:flex;gap:10px;align-items:center;justify-content:flex-end;margin-top:10px;flex-wrap:wrap}
-    .muted{color:#666;font-weight:700}
 
-    /* key modal */
-    #keyModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center}
-    #keyModal .box{width:min(520px,92vw);background:#fff;border-radius:16px;padding:16px;border:1px solid #eee}
-    #keyModal .title{font-weight:900;font-size:18px}
-    #keyModal .msg{margin:8px 0 12px;color:#666;font-weight:700}
-    #keyModal input{width:100%}
-    #keyModal .actions{display:flex;gap:10px;justify-content:flex-end;margin-top:12px}
+    /* ---------- image viewer (lightbox) ---------- */
+    #imgViewer{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.75);z-index:9999}
+    #imgViewer.open{display:flex}
+    #imgViewer .panel{width:min(1100px,calc(100vw - 24px));height:min(860px,calc(100vh - 24px));background:#0b0b0c;border:1px solid rgba(255,255,255,0.12);border-radius:16px;overflow:hidden;display:grid;grid-template-rows:auto 1fr;box-shadow:0 10px 30px rgba(0,0,0,0.45)}
+    #imgViewer .topbar{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,0.12);color:#fff;gap:8px}
+    #imgViewer .topbar button{background:rgba(255,255,255,0.10);color:#fff;border:1px solid rgba(255,255,255,0.15);border-radius:10px;padding:8px 10px;cursor:pointer}
+    #imgViewer .topbar input[type="range"]{width:220px}
+    #imgViewer .canvas{position:relative;overflow:auto;background:#0b0b0c}
+    #imgViewer .canvas img{transform-origin:0 0;display:block;user-select:none;-webkit-user-drag:none}
   </style>
 </head>
 <body>
+<header>
+  <div class="nav">
+    <a href="/admin/review">Review</a>
+    <a class="secondary" href="/admin/points">Points</a>
+  </div>
+  <div style="flex:1"></div>
+  <button class="secondary" onclick="openKey()">관리자 키</button>
+</header>
 
-  <!-- key modal -->
-  <div id="keyModal">
-    <div class="box">
-      <div class="title">관리자 키 입력</div>
-      <div class="msg" id="keyModalMsg"></div>
-      <input id="keyModalInput" placeholder="ADMIN_REVIEW_KEY" />
-      <div class="actions">
-        <button onclick="saveKeyFromModal()">저장</button>
-      </div>
-    </div>
+<main>
+  <div class="tabs">
+    <div class="tab active" data-bucket="need" onclick="setBucket('need')">리뷰필요( PENDING/HOLD )</div>
+    <div class="tab" data-bucket="pass" onclick="setBucket('pass')">PASS</div>
+    <div class="tab" data-bucket="fail" onclick="setBucket('fail')">FAIL</div>
+    <div class="tab" data-bucket="all" onclick="setBucket('all')">ALL</div>
   </div>
 
-  <header>
-    <div class="nav">
-      <a href="/admin/review">Proof Review</a>
-      <a class="secondary" href="/admin/points">Points</a>
+  <div class="stats" id="stats"></div>
+
+  <div class="filters">
+    <input id="q" placeholder="userId / sessionId / proofId 검색" style="min-width:320px"/>
+    <label>From</label><input id="from" type="date"/>
+    <label>To</label><input id="to" type="date"/>
+    <label>정렬</label>
+    <select id="order">
+      <option value="asc" selected>오래된순</option>
+      <option value="desc">최신순</option>
+    </select>
+    <label>페이지당</label>
+    <select id="take">
+      <option value="10">10</option>
+      <option value="20" selected>20</option>
+      <option value="50">50</option>
+    </select>
+
+    <button onclick="reload(true)">조회</button>
+    <button class="secondary" onclick="resetFilters()">리셋</button>
+    <div id="status" class="muted"></div>
+  </div>
+
+  <div class="grid" id="list"></div>
+
+  <div class="pager">
+    <button class="secondary" onclick="prevPage()">이전</button>
+    <span class="muted" id="pageInfo"></span>
+    <button class="secondary" onclick="nextPage()">다음</button>
+  </div>
+</main>
+
+<!-- image viewer -->
+<div id="imgViewer" onclick="onViewerBackdrop(event)">
+  <div class="panel">
+    <div class="topbar">
+      <div class="left">
+        <strong>이미지 크게 보기</strong>
+        <span class="hint" style="margin-left:10px;font-size:12px;opacity:0.8;">휠로 확대/축소 • 스크롤로 이동</span>
+      </div>
+      <div class="right" style="display:flex;gap:10px;align-items:center;">
+        <label style="display:flex;align-items:center;gap:8px;color:#fff;">
+          <span style="font-size:12px;opacity:0.8;">Zoom</span>
+          <input id="imgZoom" type="range" min="1" max="5" step="0.1" value="1" oninput="setZoom(this.value)" />
+        </label>
+        <button onclick="openImgNewTab(); event.stopPropagation();">새 탭</button>
+        <button onclick="resetZoom(); event.stopPropagation();">리셋</button>
+        <button onclick="closeImg(); event.stopPropagation();">닫기</button>
+      </div>
     </div>
-
-    <input id="key" placeholder="ADMIN_REVIEW_KEY" />
-    <button onclick="saveKeyFromHeader()">키 저장</button>
-
-    <span id="status" class="muted" style="margin-left:auto"></span>
-  </header>
-
-  <main>
-    <div class="tabs">
-      <div class="tab active" data-bucket="need" onclick="setBucket('need')">리뷰필요</div>
-      <div class="tab" data-bucket="pass" onclick="setBucket('pass')">리뷰완료 · 성공</div>
-      <div class="tab" data-bucket="fail" onclick="setBucket('fail')">리뷰완료 · 실패</div>
-      <div class="tab" data-bucket="all" onclick="setBucket('all')">전체</div>
+    <div class="canvas" id="imgCanvas">
+      <img id="imgView" alt="proof-large" />
     </div>
-
-    <div class="stats" id="stats"></div>
-
-    <div class="filters">
-      <label class="muted">검색</label>
-      <input id="q" placeholder="proofId / sessionId / userId / menuName" style="min-width:340px"/>
-
-      <label class="muted">From</label>
-      <input id="from" type="date" />
-      <label class="muted">To</label>
-      <input id="to" type="date" />
-
-      <label class="muted">정렬</label>
-      <select id="order">
-        <option value="asc">오래된순</option>
-        <option value="desc">최신순</option>
-      </select>
-
-      <label class="muted">페이지당</label>
-      <select id="take">
-        <option value="10">10</option>
-        <option value="20" selected>20</option>
-        <option value="30">30</option>
-        <option value="50">50</option>
-      </select>
-
-      <button onclick="reload()">조회</button>
-      <button class="secondary" onclick="resetFilters()">필터 초기화</button>
-    </div>
-
-    <div class="grid" id="list"></div>
-
-    <div class="pager">
-      <button class="secondary" onclick="prevPage()">이전</button>
-      <span class="muted" id="pageInfo"></span>
-      <button class="secondary" onclick="nextPage()">다음</button>
-    </div>
-  </main>
+  </div>
+</div>
 
 <script>
   // ✅ GET param(예: ?k=...) 절대 사용하지 않음
 
-  // ---------- key helpers ----------
-  function getKey(){ return (localStorage.getItem("ADMIN_REVIEW_KEY") || "").trim(); }
-  function setKey(k){ localStorage.setItem("ADMIN_REVIEW_KEY", (k||"").trim()); }
-  function clearKey(){ localStorage.removeItem("ADMIN_REVIEW_KEY"); }
+  // ---------- image viewer ----------
+  let __imgUrl = "";
+  let __imgZoom = 1;
+
+  function openImg(url){
+    __imgUrl = url || "";
+    __imgZoom = 1;
+    const viewer = document.getElementById("imgViewer");
+    const img = document.getElementById("imgView");
+    const range = document.getElementById("imgZoom");
+    const canvas = document.getElementById("imgCanvas");
+    if(!viewer || !img || !range) return;
+    img.src = __imgUrl;
+    range.value = "1";
+    img.style.transform = "scale(1)";
+    if(canvas){ canvas.scrollTop = 0; canvas.scrollLeft = 0; }
+    viewer.classList.add("open");
+  }
+
+  function closeImg(){
+    const viewer = document.getElementById("imgViewer");
+    if(viewer) viewer.classList.remove("open");
+  }
+
+  function onViewerBackdrop(ev){
+    if(ev && ev.target && ev.target.id === "imgViewer"){
+      closeImg();
+    }
+  }
+
+  function setZoom(v){
+    const z = Math.max(1, Math.min(5, Number(v)));
+    __imgZoom = z;
+    const img = document.getElementById("imgView");
+    if(img) img.style.transform = "scale(" + z + ")";
+  }
+
+  function resetZoom(){
+    const range = document.getElementById("imgZoom");
+    if(range) range.value = "1";
+    setZoom(1);
+  }
+
+  function openImgNewTab(){
+    if(!__imgUrl) return;
+    window.open(__imgUrl, "_blank", "noopener,noreferrer");
+  }
+
+  document.addEventListener("wheel", (ev) => {
+    const viewer = document.getElementById("imgViewer");
+    if(!viewer || !viewer.classList.contains("open")) return;
+    ev.preventDefault();
+    const step = ev.deltaY > 0 ? -0.1 : 0.1;
+    const next = Math.max(1, Math.min(5, __imgZoom + step));
+    const range = document.getElementById("imgZoom");
+    if(range) range.value = String(next);
+    setZoom(next);
+  }, { passive: false });
+
+  const API_BASE = "";
+  const state = { bucket:"need", page:1 };
+
+  function getKey(){ return localStorage.getItem("adminKey") || ""; }
+  function setKey(k){ localStorage.setItem("adminKey", k); }
+  function clearKey(){ localStorage.removeItem("adminKey"); }
 
   function showKeyModal(msg){
-    document.getElementById("keyModalMsg").textContent = msg || "";
-    document.getElementById("keyModal").style.display = "flex";
-    document.getElementById("keyModalInput").value = "";
-    setTimeout(() => document.getElementById("keyModalInput").focus(), 30);
-  }
-  function hideKeyModal(){
-    document.getElementById("keyModal").style.display = "none";
+    const k = prompt(msg || "관리자 키를 입력해줘");
+    if(!k) return false;
+    setKey(k.trim());
+    return true;
   }
 
-  async function authCheck(k){
-    const res = await fetch("/admin/auth-check", {
-      method: "POST",
-      headers: { "x-admin-key": k }
+  async function api(path, opts){
+    const k = getKey();
+    const res = await fetch(API_BASE + path, {
+      ...opts,
+      headers: {
+        "content-type":"application/json",
+        ...(opts && opts.headers ? opts.headers : {}),
+        ...(k ? {"x-admin-key": k} : {}),
+      }
     });
-    if(!res.ok) throw new Error("Invalid admin key");
+    if(!res.ok){
+      const t = await res.text();
+      throw new Error(t || ("HTTP " + res.status));
+    }
     return res.json();
-  }
-
-  async function saveKeyFromModal(){
-    const v = document.getElementById("keyModalInput").value.trim();
-    if(!v) return alert("키를 입력해줘");
-    try{
-      await authCheck(v);
-      setKey(v);
-      document.getElementById("key").value = v;
-      hideKeyModal();
-      reload(true);
-    }catch(e){
-      clearKey();
-      alert("키가 올바르지 않아");
-    }
-  }
-
-  async function saveKeyFromHeader(){
-    const v = document.getElementById("key").value.trim();
-    if(!v) return showKeyModal("관리자 키를 입력해줘.");
-    try{
-      await authCheck(v);
-      setKey(v);
-      reload(true);
-    }catch(e){
-      clearKey();
-      showKeyModal("키가 올바르지 않아. 다시 입력해줘.");
-    }
   }
 
   function ensureKeyOrShow(){
     const k = getKey();
-    if(!k){
-      showKeyModal("관리자 키가 필요해. 입력해줘.");
-      return false;
-    }
-    return true;
+    if(k) return true;
+    return showKeyModal("관리자 키가 필요해. 입력해줘.");
   }
 
-  // ---------- api wrapper ----------
-  async function api(path, opts={}){
-    const k = getKey();
-    const res = await fetch(path, {
-      ...opts,
-      headers: {
-        "Content-Type": "application/json",
-        "x-admin-key": k,
-        ...(opts.headers || {})
-      }
-    });
-
-    if(res.status === 401){
-      clearKey();
-      showKeyModal("관리자 키가 필요해. 다시 입력해줘.");
-      throw new Error("401 Unauthorized");
-    }
-    if(!res.ok){
-      const t = await res.text();
-      throw new Error(res.status + " " + t);
-    }
-    return res.json();
+  function openKey(){
+    if(!showKeyModal("관리자 키를 입력해줘")) return;
+    reload(true);
   }
 
-  // ---------- ui state ----------
-  const keyInput = document.getElementById("key");
-  keyInput.value = getKey();
+  async function reload(reset){
+    if(!ensureKeyOrShow()) return;
+    if(reset) state.page = 1;
 
-  let state = { bucket: "need", page: 1 };
+    const statusEl = document.getElementById("status");
+    statusEl.textContent = "불러오는중...";
+
+    try{
+      const q = buildQuery();
+      const data = await api("/admin/api/review/list?" + q.toString(), { method:"GET" });
+      renderStats(data.stats);
+      renderList(data.items);
+      const totalPages = Math.max(1, Math.ceil(data.total / data.take));
+      document.getElementById("pageInfo").textContent = "페이지 " + data.page + " / " + totalPages;
+      statusEl.textContent = "";
+    }catch(e){
+      statusEl.textContent = "에러: " + e.message;
+      console.error(e);
+    }
+  }
 
   function setBucket(bucket){
     state.bucket = bucket;
@@ -340,39 +375,7 @@ export class AdminController {
     if(q) p.set("q", q);
     if(from) p.set("from", from);
     if(to) p.set("to", to);
-    return p.toString();
-  }
-
-  async function reload(withStats=false){
-    if(!ensureKeyOrShow()) return;
-
-    const statusEl = document.getElementById("status");
-    statusEl.textContent = "불러오는 중...";
-    try{
-      if(withStats){
-        const stats = await api("/admin/proof-stats?" + buildQuery());
-        renderStats(stats);
-      }
-      const data = await api("/admin/proofs?" + buildQuery());
-      statusEl.textContent = "총 " + data.total + "건";
-      renderList(data.items);
-
-      const totalPages = Math.max(1, Math.ceil(data.total / data.take));
-      document.getElementById("pageInfo").textContent = "페이지 " + data.page + " / " + totalPages;
-    }catch(e){
-      statusEl.textContent = "에러: " + e.message;
-      console.error(e);
-    }
-  }
-
-  function renderStats(s){
-    const el = document.getElementById("stats");
-    el.innerHTML = \`
-      <div class="stat">Need: \${s.need}</div>
-      <div class="stat">PASS: \${s.pass}</div>
-      <div class="stat">FAIL: \${s.fail}</div>
-      <div class="stat">ALL: \${s.all}</div>
-    \`;
+    return p;
   }
 
   async function review(proofId, result){
@@ -389,16 +392,27 @@ export class AdminController {
     }
   }
 
+  function renderStats(s){
+    const el = document.getElementById("stats");
+    el.innerHTML = \`
+      <div class="stat">Need: \${s.need}</div>
+      <div class="stat">PASS: \${s.pass}</div>
+      <div class="stat">FAIL: \${s.fail}</div>
+      <div class="stat">ALL: \${s.all}</div>
+    \`;
+  }
+
   function renderList(items){
     const el = document.getElementById("list");
     el.innerHTML = items.map(it => {
       const line = (it.userId ? ("userId: " + it.userId) : "") + (it.menuName ? (" / " + it.menuName) : "");
       return \`
         <div class="card">
-          <div><img src="\${it.imageUrl}" /></div>
+          <div><img src="\${it.imageUrl}" alt="proof" onclick="openImg('\${it.imageUrl}'); event.stopPropagation();" /></div>
           <div class="meta">
             <div class="row">
               <span class="pill \${pillClass(it.aiResult)}">\${it.aiResult}</span>
+              \${it.aiResult === 'PENDING' && it.aiMeta && it.aiMeta.processingAt ? '<span class="pill">AI 진행중</span>' : ''}
               <span class="pill">proofId: \${it.id}</span>
               <span class="pill">sessionId: \${it.sessionId}</span>
               <span class="pill">createdAt: \${it.createdAt}</span>
@@ -435,6 +449,7 @@ export class AdminController {
 
     return html;
   }
+
 
   // 관리자 Points 페이지
   @Get('points')

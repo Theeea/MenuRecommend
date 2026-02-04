@@ -40,13 +40,6 @@ export class RecommendService {
     const startOfTodayKst = getStartOfKstDayUtc();
     const since6h = new Date(Date.now() - 6 * 60 * 60 * 1000);
 
-    // ✅ 유저가 차단(=싫어요)한 메뉴 목록: UserMenuBlock 기반으로 제외
-    const blocked = await this.prisma.userMenuBlock.findMany({
-      where: { userId },
-      select: { menuId: true },
-    });
-    const blockedMenuIds = blocked.map((b) => b.menuId);
-
     // 유저가 싫어하는 재료
     const disliked = await this.prisma.userDislikedIngredient.findMany({
       where: { userId },
@@ -56,11 +49,10 @@ export class RecommendService {
 
     /**
      * 항상 유지할 조건 (절대 추천하면 안 됨)
-     * - 차단 메뉴 제외 (UserMenuBlock)
      * - 싫어하는 재료가 MAIN이면 제외
+     * - (차단 메뉴 제외는 아래 menu.findMany where에서 blocks: none 으로 처리)
      */
     const baseAnd: any[] = [
-      ...(blockedMenuIds.length ? [{ id: { notIn: blockedMenuIds } }] : []),
       ...(dislikedIds.length
         ? [
           {
@@ -114,6 +106,9 @@ export class RecommendService {
           ...(filter.cuisine ? { cuisine: filter.cuisine } : {}),
           ...(filter.dishType ? { dishType: filter.dishType } : {}),
           AND: p.and,
+
+          // ✅ 여기서 차단(싫어요) 메뉴 제외
+          blocks: { none: { userId } },
         },
         include: {
           ingredients: {

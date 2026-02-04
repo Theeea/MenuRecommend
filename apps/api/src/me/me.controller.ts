@@ -1,4 +1,15 @@
-import { BadRequestException, Body, Controller, Get, Put, Req, UseGuards } from "@nestjs/common";
+import {
+  BadRequestException,
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  NotFoundException,
+  Param,
+  Put,
+  Req,
+  UseGuards,
+} from "@nestjs/common";
 import { AuthGuard } from "@nestjs/passport";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -80,5 +91,56 @@ export class MeController {
     }
 
     return { ok: true, count: 0 };
+  }
+
+  /**
+   * ✅ 세션별 Proof 상태 조회 (앱에서 PENDING/HOLD/PASS/FAIL 표시용)
+   * GET /me/proof-status/:sessionId
+   */
+  @Get("me/proof-status/:sessionId")
+  async proofStatus(@Req() req: any, @Param("sessionId") sessionId: string) {
+    const userId = req.user.userId;
+    const sid = String(sessionId ?? "").trim();
+    if (!sid) throw new BadRequestException("sessionId is required");
+
+    const session = await this.prisma.recommendSession.findUnique({
+      where: { id: sid },
+      select: {
+        id: true,
+        userId: true,
+        status: true,
+        doneAt: true,
+        menu: { select: { id: true, name: true } },
+      },
+    });
+
+    if (!session) throw new NotFoundException("Session not found");
+    if (session.userId !== userId) throw new ForbiddenException("Not your session");
+
+    const proof = await this.prisma.proof.findUnique({
+      where: { sessionId: sid },
+      select: {
+        id: true,
+        sessionId: true,
+        imageUrl: true,
+        aiResult: true,
+        aiScore: true,
+        aiModel: true,
+        aiMeta: true,
+        createdAt: true,
+        reviewedAt: true,
+      },
+    });
+
+    return {
+      ok: true,
+      session: {
+        id: session.id,
+        status: session.status,
+        doneAt: session.doneAt,
+        menu: session.menu,
+      },
+      proof, // 없으면 null (아직 업로드/큐잉 전)
+    };
   }
 }

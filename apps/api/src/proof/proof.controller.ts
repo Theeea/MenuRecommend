@@ -29,13 +29,15 @@ export class ProofController {
       sessionId: string;
       imageUrl: string;
       rawUrl: string;
-      challengeCode?: string;
+      challengeCode: string;
     },
   ) {
     if (!body?.sessionId)
       throw new BadRequestException('sessionId is required');
     if (!body?.imageUrl) throw new BadRequestException('imageUrl is required');
     if (!body?.rawUrl) throw new BadRequestException('rawUrl is required');
+    if (!body?.challengeCode)
+      throw new BadRequestException('challengeCode is required');
 
     return this.service.createQueued(
       req.user.userId,
