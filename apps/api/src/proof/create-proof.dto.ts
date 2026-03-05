@@ -1,5 +1,6 @@
 export class CreateProofDto {
   sessionId!: string;
   imageUrl!: string;
-  challengeCode?: string;
+  rawUrl!: string;
+  challengeCode!: string;
 }

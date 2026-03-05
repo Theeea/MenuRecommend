@@ -9,6 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { AuthGuard } from '@nestjs/passport';
+import { CreateProofDto } from './create-proof.dto';
 import { ProofService } from './proof.service';
 
 @Controller('proofs')
@@ -22,22 +23,11 @@ export class ProofController {
    */
   @UseGuards(AuthGuard('jwt'))
   @Post()
-  createQueued(
-    @Req() req: any,
-    @Body()
-    body: {
-      sessionId: string;
-      imageUrl: string;
-      rawUrl: string;
-      challengeCode: string;
-    },
-  ) {
-    if (!body?.sessionId)
-      throw new BadRequestException('sessionId is required');
+  createQueued(@Req() req: any, @Body() body: CreateProofDto) {
+    if (!body?.sessionId) throw new BadRequestException('sessionId is required');
     if (!body?.imageUrl) throw new BadRequestException('imageUrl is required');
     if (!body?.rawUrl) throw new BadRequestException('rawUrl is required');
-    if (!body?.challengeCode)
-      throw new BadRequestException('challengeCode is required');
+    if (!body?.challengeCode) throw new BadRequestException('challengeCode is required');
 
     return this.service.createQueued(
       req.user.userId,
