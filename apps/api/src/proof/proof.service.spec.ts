@@ -53,12 +53,15 @@ function createPrismaMock() {
   const prisma = {
     recommendSession: {
       findUnique: jest.fn(),
+      update: jest.fn(),
     },
     proof: {
       findUnique: jest.fn(),
       findFirst: jest.fn(),
+      findMany: jest.fn(),
       count: jest.fn(),
       create: jest.fn(),
+      update: jest.fn(),
     },
     $transaction: jest.fn((cb: (txArg: typeof tx) => unknown) => cb(tx)),
   };
@@ -77,6 +80,39 @@ function baseSession(overrides: Record<string, any> = {}) {
     acceptedAt: new Date('2026-04-29T00:01:00.000Z'),
     doneAt: null,
     menu: { name: '김치찌개' },
+    ...overrides,
+  };
+}
+
+function basePendingProof(overrides: Record<string, any> = {}) {
+  return {
+    id: 'proof-1',
+    sessionId: 'session-1',
+    imageUrl: '/uploads/proof/proof-1.jpg',
+    aiResult: ProofResult.PENDING,
+    aiScore: 0,
+    aiModel: null,
+    aiMeta: {
+      rawUrl: '/uploads/raw/raw-1.jpg',
+      attempts: 0,
+      challengeCode: 'ABC123',
+    },
+    createdAt: new Date('2026-04-29T01:00:00.000Z'),
+    reviewedAt: null,
+    reviewedByAdminId: null,
+    session: {
+      ...baseSession(),
+      menu: {
+        id: 'menu-1',
+        name: '김치찌개',
+        cuisine: 'KOREAN',
+        dishType: 'STEW',
+        ingredients: [
+          { ingredient: { name: '김치' } },
+          { ingredient: { name: '돼지고기' } },
+        ],
+      },
+    },
     ...overrides,
   };
 }
@@ -620,6 +656,309 @@ describe('ProofService.reviewByAdminKey', () => {
     expect(mock.tx.recommendSession.update).toHaveBeenCalledWith({
       where: { id: 'session-1' },
       data: { status: 'DONE', doneAt: expect.any(Date) },
+    });
+  });
+});
+
+describe('ProofService.processPendingBatch', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+    delete process.env.OPENAI_VISION_MODEL;
+    delete process.env.PROOF_PASS_BONUS;
+  });
+
+  it('passes a matching proof, awards points once, and marks the session DONE', async () => {
+    process.env.OPENAI_VISION_MODEL = 'test-vision';
+    process.env.PROOF_PASS_BONUS = '40';
+
+    const mock = createPrismaMock();
+    const service = makeService(mock);
+    const proof = basePendingProof();
+    const updatedProof = {
+      ...proof,
+      aiResult: ProofResult.PASS,
+      aiScore: 90,
+    };
+
+    mock.prisma.proof.findMany.mockResolvedValue([proof]);
+    mock.prisma.proof.update
+      .mockResolvedValueOnce({ ...proof })
+      .mockResolvedValueOnce(updatedProof);
+    mock.tx.pointLedger.findUnique.mockResolvedValue(null);
+    mock.tx.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      pointBalance: 10,
+    });
+    mock.tx.user.update.mockResolvedValue({ pointBalance: 50 });
+    mock.tx.pointLedger.create.mockResolvedValue({ id: 'ledger-1' });
+    mock.tx.recommendSession.update.mockResolvedValue({});
+
+    const qrSpy = jest
+      .spyOn(service as any, 'tryVerifyQrFromProofImage')
+      .mockResolvedValue({
+        ok: true,
+        qr: { sessionId: 'session-1', code: 'ABC123' },
+      });
+    const aiSpy = jest
+      .spyOn(service as any, 'judgeFoodWithOpenAI')
+      .mockResolvedValue({
+        match: true,
+        confidence: 0.9,
+        detected: ['김치찌개'],
+        reason: 'matches expected menu',
+      });
+
+    const result = await service.processPendingBatch(5);
+
+    expect(result).toEqual({
+      ok: true,
+      processed: 1,
+      results: [
+        {
+          id: 'proof-1',
+          result: 'PASS',
+          score: 90,
+          bonus: { ok: true, earned: 40, balanceAfter: 50 },
+        },
+      ],
+    });
+    expect(qrSpy).toHaveBeenCalledWith(
+      '/uploads/proof/proof-1.jpg',
+      'session-1',
+      'ABC123',
+    );
+    expect(aiSpy).toHaveBeenCalledWith({
+      rawUrl: '/uploads/raw/raw-1.jpg',
+      expected: {
+        menuName: '김치찌개',
+        cuisine: 'KOREAN',
+        dishType: 'STEW',
+        ingredients: ['김치', '돼지고기'],
+      },
+    });
+    expect(mock.prisma.proof.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 'proof-1' },
+      data: expect.objectContaining({
+        aiResult: 'PASS',
+        aiScore: 90,
+        aiModel: 'test-vision',
+        reviewedAt: expect.any(Date),
+        aiMeta: expect.objectContaining({
+          qr: { sessionId: 'session-1', code: 'ABC123' },
+          openai: expect.objectContaining({ match: true, confidence: 0.9 }),
+          attempts: 1,
+          processingAt: null,
+          processedAt: expect.any(String),
+        }),
+      }),
+    });
+    expect(mock.tx.pointLedger.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: 'user-1',
+        kind: 'EARN',
+        source: 'PROOF',
+        sourceId: 'proof-1',
+        proofId: 'proof-1',
+        points: 40,
+        balanceAfter: 50,
+        dedupeKey: 'PROOF:PASS:proof-1',
+      }),
+      select: { id: true },
+    });
+    expect(mock.tx.recommendSession.update).toHaveBeenCalledWith({
+      where: { id: 'session-1' },
+      data: { status: 'DONE', doneAt: expect.any(Date) },
+    });
+  });
+
+  it('uses the proof reward dedupeKey when a worker PASS is processed again', async () => {
+    const mock = createPrismaMock();
+    const service = makeService(mock);
+    const proof = basePendingProof();
+    const updatedProof = {
+      ...proof,
+      aiResult: ProofResult.PASS,
+      aiScore: 88,
+    };
+
+    mock.prisma.proof.findMany.mockResolvedValue([proof]);
+    mock.prisma.proof.update
+      .mockResolvedValueOnce({ ...proof })
+      .mockResolvedValueOnce(updatedProof);
+    mock.tx.pointLedger.findUnique.mockResolvedValue({
+      id: 'ledger-existing',
+      balanceAfter: 50,
+      points: 40,
+    });
+    mock.tx.recommendSession.update.mockResolvedValue({});
+
+    jest
+      .spyOn(service as any, 'tryVerifyQrFromProofImage')
+      .mockResolvedValue(null);
+    jest.spyOn(service as any, 'judgeFoodWithOpenAI').mockResolvedValue({
+      match: true,
+      confidence: 0.88,
+      detected: ['김치찌개'],
+      reason: 'matches expected menu',
+    });
+
+    const result = await service.processPendingBatch(5);
+
+    expect(result.results).toEqual([
+      {
+        id: 'proof-1',
+        result: 'PASS',
+        score: 88,
+        bonus: {
+          ok: true,
+          earned: 0,
+          balanceAfter: 50,
+          deduped: true,
+        },
+      },
+    ]);
+    expect(mock.tx.user.findUnique).not.toHaveBeenCalled();
+    expect(mock.tx.user.update).not.toHaveBeenCalled();
+    expect(mock.tx.pointLedger.create).not.toHaveBeenCalled();
+  });
+
+  it('fails a confident mismatch without awarding points and marks the session DONE', async () => {
+    const mock = createPrismaMock();
+    const service = makeService(mock);
+    const proof = basePendingProof();
+    const updatedProof = {
+      ...proof,
+      aiResult: ProofResult.FAIL,
+      aiScore: 95,
+    };
+
+    mock.prisma.proof.findMany.mockResolvedValue([proof]);
+    mock.prisma.proof.update
+      .mockResolvedValueOnce({ ...proof })
+      .mockResolvedValueOnce(updatedProof);
+    mock.prisma.recommendSession.update.mockResolvedValue({});
+
+    jest
+      .spyOn(service as any, 'tryVerifyQrFromProofImage')
+      .mockResolvedValue(null);
+    jest.spyOn(service as any, 'judgeFoodWithOpenAI').mockResolvedValue({
+      match: false,
+      confidence: 0.95,
+      detected: ['피자'],
+      reason: 'different food',
+    });
+
+    const result = await service.processPendingBatch(5);
+
+    expect(result.results).toEqual([
+      { id: 'proof-1', result: 'FAIL', score: 95 },
+    ]);
+    expect(mock.prisma.recommendSession.update).toHaveBeenCalledWith({
+      where: { id: 'session-1' },
+      data: { status: 'DONE', doneAt: expect.any(Date) },
+    });
+    expect(mock.tx.pointLedger.create).not.toHaveBeenCalled();
+    expect(mock.tx.user.update).not.toHaveBeenCalled();
+  });
+
+  it('holds an uncertain AI decision without marking the session DONE', async () => {
+    const mock = createPrismaMock();
+    const service = makeService(mock);
+    const proof = basePendingProof();
+    const updatedProof = {
+      ...proof,
+      aiResult: ProofResult.HOLD,
+      aiScore: 62,
+    };
+
+    mock.prisma.proof.findMany.mockResolvedValue([proof]);
+    mock.prisma.proof.update
+      .mockResolvedValueOnce({ ...proof })
+      .mockResolvedValueOnce(updatedProof);
+
+    jest
+      .spyOn(service as any, 'tryVerifyQrFromProofImage')
+      .mockResolvedValue(null);
+    jest.spyOn(service as any, 'judgeFoodWithOpenAI').mockResolvedValue({
+      match: true,
+      confidence: 0.62,
+      detected: ['찌개'],
+      reason: 'not confident enough',
+    });
+
+    const result = await service.processPendingBatch(5);
+
+    expect(result.results).toEqual([
+      { id: 'proof-1', result: 'HOLD', score: 62 },
+    ]);
+    expect(mock.prisma.recommendSession.update).not.toHaveBeenCalled();
+    expect(mock.tx.recommendSession.update).not.toHaveBeenCalled();
+    expect(mock.tx.pointLedger.create).not.toHaveBeenCalled();
+  });
+
+  it('moves a proof without rawUrl to HOLD for manual review', async () => {
+    const mock = createPrismaMock();
+    const service = makeService(mock);
+    const proof = basePendingProof({ aiMeta: { attempts: 1 } });
+
+    mock.prisma.proof.findMany.mockResolvedValue([proof]);
+    mock.prisma.proof.update.mockResolvedValue({ ...proof });
+
+    const result = await service.processPendingBatch(5);
+
+    expect(result.results).toEqual([
+      { id: 'proof-1', error: 'rawUrl missing in aiMeta', held: true },
+    ]);
+    expect(mock.prisma.proof.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 'proof-1' },
+      data: {
+        aiResult: 'HOLD',
+        aiModel: 'gpt-4.1-mini',
+        aiMeta: expect.objectContaining({
+          openaiError:
+            'rawUrl missing in aiMeta (legacy proof). Need manual review.',
+          attempts: 2,
+          processingAt: null,
+          processedAt: expect.any(String),
+        }),
+      },
+    });
+  });
+
+  it('moves an invalid QR proof to HOLD for manual review', async () => {
+    const mock = createPrismaMock();
+    const service = makeService(mock);
+    const proof = basePendingProof({
+      aiMeta: { rawUrl: '/uploads/raw/raw-1.jpg', attempts: 1 },
+    });
+
+    mock.prisma.proof.findMany.mockResolvedValue([proof]);
+    mock.prisma.proof.update.mockResolvedValue({ ...proof });
+
+    jest.spyOn(service as any, 'tryVerifyQrFromProofImage').mockResolvedValue({
+      ok: false,
+      error: 'QR challengeCode mismatch',
+      qr: { sessionId: 'session-1', code: 'WRONG' },
+    });
+
+    const result = await service.processPendingBatch(5);
+
+    expect(result.results).toEqual([
+      { id: 'proof-1', error: 'QR challengeCode mismatch', held: true },
+    ]);
+    expect(mock.prisma.proof.update).toHaveBeenNthCalledWith(2, {
+      where: { id: 'proof-1' },
+      data: {
+        aiResult: 'HOLD',
+        aiModel: 'gpt-4.1-mini',
+        aiMeta: expect.objectContaining({
+          qr: { sessionId: 'session-1', code: 'WRONG' },
+          qrError: 'QR challengeCode mismatch',
+          attempts: 2,
+          processingAt: null,
+          processedAt: expect.any(String),
+        }),
+      },
     });
   });
 });
