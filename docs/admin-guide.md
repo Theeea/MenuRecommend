@@ -12,6 +12,7 @@
 - `GET /admin/review`
 - `GET /admin/points`
 - `GET /admin/api/review/list`
+- `GET /admin/proofs`
 - `POST /proofs/:id/review`
 
 ## 이미지 정책
@@ -46,6 +47,27 @@ HOLD 사유 카테고리:
 - `FILE`
 - `QR`
 - `REVIEW`
+
+## HOLD 필터
+
+어드민 리뷰 화면은 HOLD 사유별 필터를 제공합니다.
+
+필터 값:
+
+- 전체
+- `QUOTA`: OpenAI quota, 429, rate limit 계열
+- `FILE`: raw/proof 파일 없음
+- `QR`: QR decode, sessionId, challengeCode, signature 검증 실패
+- `REVIEW`: 저신뢰도 또는 기타 수동 검토
+
+목록 API는 아래 두 경로를 지원합니다.
+
+```text
+GET /admin/api/review/list
+GET /admin/proofs
+```
+
+`/admin/api/review/list`는 어드민 HTML 화면에서 사용하는 호환 라우트입니다.
 
 ## 수동 리뷰
 

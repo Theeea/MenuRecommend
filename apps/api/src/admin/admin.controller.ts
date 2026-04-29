@@ -64,6 +64,60 @@ function clamp(n: number, min: number, max: number) {
   return Math.max(min, Math.min(max, n));
 }
 
+type HoldReason = 'QUOTA' | 'FILE' | 'QR' | 'REVIEW';
+
+function getProofProcessingState(meta: any) {
+  return Boolean(meta?.processingAt && !meta?.processedAt);
+}
+
+function getHoldReason(aiResult: any, meta: any): HoldReason | null {
+  if (String(aiResult) !== 'HOLD') return null;
+
+  const openaiError = String(meta?.openaiError ?? '');
+  const qrError = String(meta?.qrError ?? '');
+  if (/file not found|rawUrl missing/i.test(openaiError + ' ' + qrError)) {
+    return 'FILE';
+  }
+  if (meta?.qrError) return 'QR';
+  if (/\b429\b|quota|rate limit/i.test(openaiError)) return 'QUOTA';
+  return 'REVIEW';
+}
+
+function matchesHoldReason(aiResult: any, meta: any, reason?: string) {
+  const r = String(reason ?? '')
+    .trim()
+    .toUpperCase();
+  if (!r || r === 'ALL') return true;
+  return getHoldReason(aiResult, meta) === r;
+}
+
+function buildProofStats(items: any[]) {
+  const stats = {
+    need: 0,
+    pass: 0,
+    fail: 0,
+    all: items.length,
+    holdReasons: {
+      QR: 0,
+      FILE: 0,
+      QUOTA: 0,
+      REVIEW: 0,
+    } as Record<HoldReason, number>,
+  };
+
+  for (const item of items) {
+    const result = String(item?.aiResult ?? '');
+    if (result === 'PENDING' || result === 'HOLD') stats.need += 1;
+    if (result === 'PASS') stats.pass += 1;
+    if (result === 'FAIL') stats.fail += 1;
+
+    const reason = getHoldReason(item?.aiResult, item?.aiMeta);
+    if (reason) stats.holdReasons[reason] += 1;
+  }
+
+  return stats;
+}
+
 @Controller('admin')
 export class AdminController {
   constructor(private readonly prisma: PrismaService) {}
@@ -113,6 +167,12 @@ export class AdminController {
     .pill.pending{background:#e8f0ff}
     .pill.pass{background:#e7ffe8}
     .pill.fail{background:#ffe7e7}
+    .pill.reason{background:#f3e8ff;color:#5b21b6}
+    .pill.reason.QR{background:#fee2e2;color:#991b1b}
+    .pill.reason.FILE{background:#ffedd5;color:#9a3412}
+    .pill.reason.QUOTA{background:#dbeafe;color:#1e40af}
+    .pill.reason.REVIEW{background:#ede9fe;color:#5b21b6}
+    .pill.processing{background:#e0f2fe;color:#075985}
     .actions{display:flex;gap:10px;margin-top:6px;flex-wrap:wrap}
     .actions button{min-width:110px}
     .actions button.pass{background:#0a7a2f}
@@ -165,6 +225,14 @@ export class AdminController {
       <option value="10">10</option>
       <option value="20" selected>20</option>
       <option value="50">50</option>
+    </select>
+    <label>HOLD 사유</label>
+    <select id="holdReason">
+      <option value="ALL" selected>전체</option>
+      <option value="QUOTA">QUOTA / 429</option>
+      <option value="FILE">FILE / 파일 없음</option>
+      <option value="QR">QR 실패</option>
+      <option value="REVIEW">REVIEW / 수동검토</option>
     </select>
 
     <button onclick="reload(true)">조회</button>
@@ -344,6 +412,7 @@ export class AdminController {
     document.getElementById("to").value = "";
     document.getElementById("order").value = "asc";
     document.getElementById("take").value = "20";
+    document.getElementById("holdReason").value = "ALL";
     state.page = 1;
     reload(true);
   }
@@ -366,12 +435,14 @@ export class AdminController {
     const to = document.getElementById("to").value;
     const take = document.getElementById("take").value;
     const order = document.getElementById("order").value;
+    const holdReason = document.getElementById("holdReason").value;
 
     const p = new URLSearchParams();
     p.set("bucket", state.bucket);
     p.set("page", String(state.page));
     p.set("take", String(take));
     p.set("order", order);
+    if(holdReason && holdReason !== "ALL") p.set("holdReason", holdReason);
     if(q) p.set("q", q);
     if(from) p.set("from", from);
     if(to) p.set("to", to);
@@ -399,7 +470,20 @@ export class AdminController {
       <div class="stat">PASS: \${s.pass}</div>
       <div class="stat">FAIL: \${s.fail}</div>
       <div class="stat">ALL: \${s.all}</div>
+      <div class="stat">QR: \${s.holdReasons ? s.holdReasons.QR : 0}</div>
+      <div class="stat">FILE: \${s.holdReasons ? s.holdReasons.FILE : 0}</div>
+      <div class="stat">QUOTA: \${s.holdReasons ? s.holdReasons.QUOTA : 0}</div>
+      <div class="stat">REVIEW: \${s.holdReasons ? s.holdReasons.REVIEW : 0}</div>
     \`;
+  }
+
+  function reasonPill(it){
+    if(!it.holdReason) return "";
+    return '<span class="pill reason '+escapeHtml(it.holdReason)+'">HOLD: '+escapeHtml(it.holdReason)+'</span>';
+  }
+
+  function processingPill(it){
+    return it.isProcessing ? '<span class="pill processing">AI 진행중</span>' : '';
   }
 
   function renderList(items){
@@ -412,7 +496,8 @@ export class AdminController {
           <div class="meta">
             <div class="row">
               <span class="pill \${pillClass(it.aiResult)}">\${it.aiResult}</span>
-              \${it.aiResult === 'PENDING' && it.aiMeta && it.aiMeta.processingAt ? '<span class="pill">AI 진행중</span>' : ''}
+              \${processingPill(it)}
+              \${reasonPill(it)}
               <span class="pill">proofId: \${it.id}</span>
               <span class="pill">sessionId: \${it.sessionId}</span>
               <span class="pill">createdAt: \${it.createdAt}</span>
@@ -449,7 +534,6 @@ export class AdminController {
 
     return html;
   }
-
 
   // 관리자 Points 페이지
   @Get('points')
@@ -851,10 +935,12 @@ export class AdminController {
   }
 
   // 목록 (탭/페이징/필터/검색)
+  @Get('api/review/list')
   @Get('proofs')
   async proofs(
     @Headers('x-admin-key') adminKey?: string,
     @Query('bucket') bucket?: string, // need|pass|fail|all
+    @Query('holdReason') holdReason?: string, // ALL|QUOTA|FILE|QR|REVIEW
     @Query('q') q?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
@@ -866,10 +952,14 @@ export class AdminController {
 
     const p = clamp(toInt(page, 1), 1, 1000000);
     const t = clamp(toInt(take, 20), 1, 100);
-    const skip = (p - 1) * t;
 
     const createdAt = parseKstRange(from, to);
     const search = (q ?? '').trim();
+    const holdReasonFilter = String(holdReason ?? '')
+      .trim()
+      .toUpperCase();
+    const shouldFilterHoldReason =
+      !!holdReasonFilter && holdReasonFilter !== 'ALL';
 
     const where: any = {};
     if (createdAt) where.createdAt = createdAt;
@@ -896,30 +986,38 @@ export class AdminController {
 
     const sort: any = order === 'desc' ? 'desc' : 'asc';
 
-    const [total, items] = await Promise.all([
-      this.prisma.proof.count({ where }),
-      this.prisma.proof.findMany({
-        where,
-        orderBy: { createdAt: sort },
-        skip,
-        take: t,
-        include: {
-          session: {
-            select: {
-              userId: true,
-              challengeCode: true,
-              menu: { select: { name: true } },
-            },
+    const allItems = await this.prisma.proof.findMany({
+      where,
+      orderBy: { createdAt: sort },
+      include: {
+        session: {
+          select: {
+            userId: true,
+            challengeCode: true,
+            menu: { select: { name: true } },
           },
         },
-      }),
-    ]);
+      },
+    });
+
+    const filteredItems = shouldFilterHoldReason
+      ? allItems.filter((x: any) =>
+          matchesHoldReason(x.aiResult, x.aiMeta, holdReasonFilter),
+        )
+      : allItems;
+
+    const total = filteredItems.length;
+    const skip = (p - 1) * t;
+    const items = filteredItems.slice(skip, skip + t);
+
+    const stats = buildProofStats(allItems);
 
     return {
       ok: true,
       page: p,
       take: t,
       total,
+      stats,
       items: items.map((x: any) => ({
         id: x.id,
         sessionId: x.sessionId,
@@ -928,6 +1026,8 @@ export class AdminController {
         reviewedAt: x.reviewedAt,
         imageUrl: x.imageUrl,
         aiMeta: x.aiMeta,
+        isProcessing: getProofProcessingState(x.aiMeta),
+        holdReason: getHoldReason(x.aiResult, x.aiMeta),
         userId: x.session?.userId ?? null,
         menuName: x.session?.menu?.name ?? null,
         challengeCode: x.session?.challengeCode ?? null,
