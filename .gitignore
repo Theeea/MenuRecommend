@@ -82,4 +82,6 @@ apps/admin/node_modules/.cache/
 
 # 업로드 된 이미지 (로컬용)
 apps/api/uploads/
-uploads/
+/uploads/
+!apps/api/src/uploads/
+!apps/api/src/uploads/**

@@ -123,3 +123,10 @@ OpenAI 또는 파일 오류:
 
 - `aiMeta.rawUrl`이 없을 수 있습니다.
 - 이 경우 유저 화면에서 fallback으로 `imageUrl`이 보이는 것은 허용합니다.
+
+## 업로드 보안
+
+상세 정책은 [업로드 보안 정책](upload-security.md)을 확인합니다.
+
+현재 proof 업로드는 JPEG, PNG, WebP만 허용하며 파일 크기는 10MB로 제한합니다.
+저장 파일명은 원본 파일명이 아니라 서버 생성 UUID를 사용합니다.

@@ -508,10 +508,9 @@ query string으로 관리자 키를 받는 코드를 추가하지 않습니다.
 - 운영 worker 방식 결정: OS cron, node-cron, BullMQ
 - 어드민 리뷰 및 포인트 조정 audit log 추가
 - 운영 전 업로드 보안 강화:
-  - 파일 타입 제한
-  - 파일 크기 제한
-  - signed URL 또는 인증 proxy
+  - signed URL 또는 인증 proxy 검토
   - 정적 서빙 범위 제한
+  - 업로드 실패 cleanup 로그
 - MVP 이후 포인트 사용 기능:
   - `GET /shop/items`
   - `POST /shop/purchase`
