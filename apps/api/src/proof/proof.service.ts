@@ -144,21 +144,26 @@ export class ProofService {
       const blockWhilePending =
         (process.env.PROOF_BLOCK_WHILE_PENDING ?? '1') !== '0';
 
-      // (1) PENDING이 있으면 신규 업로드 차단 (기본 on)
+      // (1) PENDING/HOLD가 있으면 신규 업로드 차단 (기본 on)
       if (blockWhilePending) {
-        const pending = await tx.proof.findFirst({
-          where: { aiResult: ProofResult.PENDING, session: { userId } },
-          select: { id: true, sessionId: true, createdAt: true },
+        const active = await tx.proof.findFirst({
+          where: {
+            aiResult: { in: [ProofResult.PENDING, ProofResult.HOLD] },
+            session: { userId },
+          },
+          select: { id: true, sessionId: true, aiResult: true, createdAt: true },
           orderBy: { createdAt: 'desc' },
         });
 
-        if (pending) {
+        if (active) {
           throw new HttpException(
             {
               code: 'PROOF_PENDING',
               message:
-                '현재 인증이 검토중입니다. 결과가 나올 때까지 기다려 주세요.',
-              pending,
+                active.aiResult === ProofResult.HOLD
+                  ? '현재 인증이 관리자 검토 대기중입니다. 결과가 나올 때까지 기다려 주세요.'
+                  : '현재 인증이 검토중입니다. 결과가 나올 때까지 기다려 주세요.',
+              pending: active,
             },
             HttpStatus.TOO_MANY_REQUESTS,
           );
@@ -382,6 +387,7 @@ export class ProofService {
 
         // rawUrl 없으면 AI 판독 불가 → HOLD
         if (!rawUrl) {
+          const now = new Date().toISOString();
           await this.prisma.proof.update({
             where: { id: proof.id },
             data: {
@@ -391,9 +397,10 @@ export class ProofService {
                 ...meta,
                 openaiError:
                   'rawUrl missing in aiMeta (legacy proof). Need manual review.',
-                lastErrorAt: new Date().toISOString(),
+                attempts: Number(meta.attempts ?? 0) + 1,
+                lastErrorAt: now,
                 processingAt: null,
-                processedAt: new Date().toISOString(),
+                processedAt: now,
               },
             },
           });
@@ -415,6 +422,7 @@ export class ProofService {
 
         // qrCheck가 명확히 invalid면 HOLD로(오탐 방지)
         if (qrCheck && qrCheck.ok === false) {
+          const now = new Date().toISOString();
           await this.prisma.proof.update({
             where: { id: proof.id },
             data: {
@@ -424,9 +432,10 @@ export class ProofService {
                 ...meta,
                 qr: qrCheck.qr ?? null,
                 qrError: qrCheck.error,
-                lastErrorAt: new Date().toISOString(),
+                attempts: Number(meta.attempts ?? 0) + 1,
+                lastErrorAt: now,
                 processingAt: null,
-                processedAt: new Date().toISOString(),
+                processedAt: now,
               },
             },
           });

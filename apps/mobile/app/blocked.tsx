@@ -1,212 +1,276 @@
-import React, { useCallback, useState } from "react";
-import { Alert, FlatList, Pressable, Text, View } from "react-native";
+import React, { useCallback, useMemo, useState } from "react";
+import {
+    ActivityIndicator,
+    Alert,
+    FlatList,
+    Pressable,
+    RefreshControl,
+    Text,
+    View,
+} from "react-native";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
-import { Ionicons } from "@expo/vector-icons";
-import * as Haptics from "expo-haptics";
-import { Stack, useFocusEffect, useRouter } from "expo-router";
+import { useRouter } from "expo-router";
+import { useFocusEffect } from "@react-navigation/native";
 import { api } from "../src/api/client";
 
-type Row = {
+type BlockRow = {
     id: string;
     menuId: string;
     createdAt: string;
-    menu?: { id: string; name?: string; title?: string; cuisine?: string; dishType?: string | null };
+    menu?: {
+        id: string;
+        name: string;
+        cuisine?: string | null;
+        dishType?: string | null;
+    } | null;
 };
 
-export default function BlockedPage() {
+type ApiRes = {
+    ok: boolean;
+    data?: BlockRow[];
+    nextCursor?: string | null;
+    message?: string;
+};
+
+function fmtDate(iso: string) {
+    const d = new Date(iso);
+    return d.toLocaleString("ko-KR", {
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+}
+
+export default function BlockedScreen() {
     const router = useRouter();
     const insets = useSafeAreaInsets();
 
-    const [rows, setRows] = useState<Row[]>([]);
-    const [loading, setLoading] = useState(false);
+    const [items, setItems] = useState<BlockRow[]>([]);
+    const [nextCursor, setNextCursor] = useState<string | null>(null);
 
-    const load = useCallback(async () => {
-        setLoading(true);
+    const [loading, setLoading] = useState(true);
+    const [refreshing, setRefreshing] = useState(false);
+    const [loadingMore, setLoadingMore] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+
+    const canLoadMore = useMemo(
+        () => Boolean(nextCursor && !loadingMore && !refreshing),
+        [nextCursor, loadingMore, refreshing]
+    );
+
+    const fetchList = useCallback(async (cursor?: string | null, append = false) => {
+        const take = 30;
+        const qs = new URLSearchParams();
+        qs.set("take", String(take));
+        if (cursor) qs.set("cursor", cursor);
+
+        const res = await api.get<ApiRes>(`/me/blocked-menus?${qs.toString()}`);
+        const data = res.data;
+
+        if (!data?.ok) throw new Error(data?.message || "차단 목록을 불러오지 못했어요.");
+
+        const rows = data.data ?? [];
+        setNextCursor(data.nextCursor ?? null);
+
+        if (append) setItems((prev) => [...prev, ...rows]);
+        else setItems(rows);
+    }, []);
+
+    const refresh = useCallback(async () => {
+        setRefreshing(true);
+        setError(null);
         try {
-            const res = await api.get("/me/blocked-menus");
-            const body = res.data;
-
-            // ✅ 응답 형태 전부 대응
-            const list: any[] =
-                Array.isArray(body) ? body :
-                    Array.isArray(body?.data) ? body.data :
-                        Array.isArray(body?.items) ? body.items :
-                            Array.isArray(body?.blockedMenus) ? body.blockedMenus :
-                                [];
-
-            setRows(list);
+            await fetchList(null, false);
         } catch (e: any) {
             const status = e?.response?.status;
-            if (status === 401) {
-                Alert.alert("세션 만료", "다시 로그인 해줘.");
-                router.replace("/login");
-                return;
-            }
-            Alert.alert("불러오기 실패", e?.response?.data?.message ?? e?.message ?? "잠시 후 다시 시도해줘.");
+            if (status === 401) setError("로그인이 필요해요. 다시 로그인해 주세요.");
+            else setError(String(e?.message ?? e));
         } finally {
-            setLoading(false);
+            setRefreshing(false);
         }
-    }, [router]);
+    }, [fetchList]);
 
-    useFocusEffect(
-        useCallback(() => {
-            load();
-        }, [load])
-    );
+    const loadMore = useCallback(async () => {
+        if (!canLoadMore) return;
+        setLoadingMore(true);
+        setError(null);
+        try {
+            await fetchList(nextCursor, true);
+        } catch (e: any) {
+            setError(String(e?.message ?? e));
+        } finally {
+            setLoadingMore(false);
+        }
+    }, [canLoadMore, fetchList, nextCursor]);
 
-    const removeOne = useCallback(
-        (menuId: string) => {
-            Alert.alert("삭제", "이 메뉴를 싫어요 목록에서 삭제할까요?", [
-                { text: "취소", style: "cancel" },
-                {
-                    text: "삭제",
-                    style: "destructive",
-                    onPress: async () => {
-                        try {
-                            await Haptics.selectionAsync();
-                            await api.delete(`/me/blocked-menus/${menuId}`);
-                            setRows((prev) => prev.filter((r) => r.menuId !== menuId));
-                        } catch (e: any) {
-                            Alert.alert("삭제 실패", e?.response?.data?.message ?? e?.message ?? "잠시 후 다시 시도해줘.");
-                        }
-                    },
-                },
-            ]);
-        },
-        []
-    );
-
-    const resetAll = useCallback(() => {
-        Alert.alert("전체 초기화", "싫어요 목록을 전부 삭제할까요?", [
+    const removeOne = useCallback(async (menuId: string) => {
+        Alert.alert("차단 해제", "이 메뉴 차단을 해제할까요?", [
             { text: "취소", style: "cancel" },
             {
-                text: "초기화",
+                text: "해제",
                 style: "destructive",
                 onPress: async () => {
                     try {
-                        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-                        await api.delete("/me/blocked-menus");
-                        setRows([]);
+                        await api.delete(`/me/blocked-menus/${menuId}`);
+                        setItems((prev) => prev.filter((x) => x.menuId !== menuId));
                     } catch (e: any) {
-                        Alert.alert("초기화 실패", e?.response?.data?.message ?? e?.message ?? "잠시 후 다시 시도해줘.");
+                        Alert.alert("실패", e?.response?.data?.message || e?.message || "삭제에 실패했어요.");
                     }
                 },
             },
         ]);
     }, []);
 
+    const resetAll = useCallback(async () => {
+        Alert.alert("전체 초기화", "차단 목록을 전부 초기화할까요?", [
+            { text: "취소", style: "cancel" },
+            {
+                text: "초기화",
+                style: "destructive",
+                onPress: async () => {
+                    try {
+                        await api.delete(`/me/blocked-menus`);
+                        setItems([]);
+                        setNextCursor(null);
+                    } catch (e: any) {
+                        Alert.alert("실패", e?.response?.data?.message || e?.message || "초기화에 실패했어요.");
+                    }
+                },
+            },
+        ]);
+    }, []);
+
+    useFocusEffect(
+        useCallback(() => {
+            setLoading(true);
+            refresh().finally(() => setLoading(false));
+        }, [refresh])
+    );
+
+    const renderItem = ({ item }: { item: BlockRow }) => {
+        const name = item.menu?.name ?? "(알 수 없는 메뉴)";
+        const meta = [item.menu?.cuisine, item.menu?.dishType].filter(Boolean).join(" · ");
+
+        return (
+            <View
+                style={{
+                    paddingVertical: 12,
+                    paddingHorizontal: 14,
+                    borderBottomWidth: 1,
+                    borderColor: "#EFEFEF",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    gap: 10,
+                }}
+            >
+                <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: "900", color: "#111827" }}>
+                        {name}
+                    </Text>
+                    <Text style={{ marginTop: 4, fontSize: 12, color: "#6B7280" }}>
+                        {meta ? `${meta} · ` : ""}
+                        {fmtDate(item.createdAt)}
+                    </Text>
+                </View>
+
+                <Pressable
+                    onPress={() => removeOne(item.menuId)}
+                    style={{
+                        paddingVertical: 10,
+                        paddingHorizontal: 12,
+                        borderRadius: 12,
+                        backgroundColor: "#111827",
+                    }}
+                >
+                    <Text style={{ color: "#fff", fontWeight: "900", fontSize: 12 }}>해제</Text>
+                </Pressable>
+            </View>
+        );
+    };
+
     return (
-        <>
-            {/* ✅ 여기서도 (tabs) 헤더 뜨면 제거 */}
-            <Stack.Screen options={{ headerShown: false }} />
-
-            <SafeAreaView style={{ flex: 1, backgroundColor: "#FFF6EE" }} edges={["top", "bottom"]}>
-                <View style={{ flex: 1, padding: 16, paddingBottom: 16 + insets.bottom }}>
-                    <View
-                        style={{
-                            backgroundColor: "#fff",
-                            borderRadius: 18,
-                            padding: 16,
-                            shadowColor: "#000",
-                            shadowOpacity: 0.06,
-                            shadowRadius: 10,
-                            shadowOffset: { width: 0, height: 4 },
-                        }}
-                    >
-                        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
-                            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                                <Pressable onPress={() => router.back()} hitSlop={10}>
-                                    <Ionicons name="chevron-back" size={22} color="#111" />
-                                </Pressable>
-                                <Text style={{ fontSize: 18, fontWeight: "900", color: "#111" }}>
-                                    싫어요 목록
-                                </Text>
-                            </View>
-
-                            <Pressable
-                                onPress={resetAll}
-                                style={{
-                                    paddingVertical: 10,
-                                    paddingHorizontal: 12,
-                                    borderRadius: 12,
-                                    backgroundColor: "#111",
-                                }}
-                            >
-                                <Text style={{ color: "#fff", fontWeight: "900" }}>전체 초기화</Text>
-                            </Pressable>
-                        </View>
-
-                        <Text style={{ marginTop: 8, color: "#666", fontWeight: "700" }}>
-                            {loading ? "불러오는 중..." : `현재 ${rows.length}개`}
+        <SafeAreaView style={{ flex: 1, backgroundColor: "#FFF6EE" }} edges={["top", "bottom"]}>
+            <View style={{ flex: 1, paddingTop: 10, paddingHorizontal: 16 }}>
+                <View
+                    style={{
+                        backgroundColor: "#fff",
+                        borderRadius: 18,
+                        padding: 14,
+                        flexDirection: "row",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                    }}
+                >
+                    <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={{ fontSize: 18, fontWeight: "900", color: "#111" }}>차단 메뉴</Text>
+                        <Text style={{ marginTop: 6, color: "#6B7280", fontWeight: "700" }}>
+                            차단한 메뉴는 추천에서 제외돼요.
                         </Text>
                     </View>
 
-                    <View style={{ height: 14 }} />
+                    <View style={{ flexDirection: "row", gap: 8 }}>
+                        <Pressable
+                            onPress={resetAll}
+                            style={{
+                                paddingVertical: 10,
+                                paddingHorizontal: 12,
+                                borderRadius: 12,
+                                backgroundColor: "#FEE2E2",
+                            }}
+                        >
+                            <Text style={{ color: "#B42318", fontWeight: "900", fontSize: 12 }}>전체 초기화</Text>
+                        </Pressable>
 
-                    <FlatList
-                        data={rows}
-                        keyExtractor={(item) => item.id}
-                        contentContainerStyle={{ paddingBottom: 30 }}
-                        ListEmptyComponent={
-                            <View
-                                style={{
-                                    backgroundColor: "#fff",
-                                    borderRadius: 18,
-                                    padding: 16,
-                                    alignItems: "center",
-                                }}
-                            >
-                                <Text style={{ color: "#666", fontWeight: "800" }}>
-                                    싫어요 누른 메뉴가 없습니다.
-                                </Text>
-                            </View>
-                        }
-                        renderItem={({ item }) => {
-                            const name = item.menu?.name ?? item.menu?.title ?? item.menuId;
-
-                            return (
-                                <View
-                                    style={{
-                                        backgroundColor: "#fff",
-                                        borderRadius: 18,
-                                        padding: 16,
-                                        marginBottom: 10,
-                                        shadowColor: "#000",
-                                        shadowOpacity: 0.04,
-                                        shadowRadius: 10,
-                                        shadowOffset: { width: 0, height: 4 },
-                                    }}
-                                >
-                                    <Text style={{ fontSize: 16, fontWeight: "900", color: "#111" }}>
-                                        {name}
-                                    </Text>
-                                    <Text style={{ marginTop: 6, color: "#666", fontWeight: "700" }}>
-                                        {new Date(item.createdAt).toLocaleString()}
-                                    </Text>
-
-                                    <View style={{ height: 12 }} />
-
-                                    <Pressable
-                                        onPress={() => removeOne(item.menuId)}
-                                        style={{
-                                            paddingVertical: 12,
-                                            borderRadius: 14,
-                                            backgroundColor: "#F2F2F2",
-                                            alignItems: "center",
-                                            flexDirection: "row",
-                                            justifyContent: "center",
-                                            gap: 6,
-                                        }}
-                                    >
-                                        <Ionicons name="trash" size={16} color="#111" />
-                                        <Text style={{ fontWeight: "900", color: "#111" }}>목록에서 삭제</Text>
-                                    </Pressable>
-                                </View>
-                            );
-                        }}
-                    />
+                        <Pressable
+                            onPress={() => router.back()}
+                            style={{
+                                paddingVertical: 10,
+                                paddingHorizontal: 12,
+                                borderRadius: 12,
+                                backgroundColor: "#111",
+                            }}
+                        >
+                            <Text style={{ color: "#fff", fontWeight: "900", fontSize: 12 }}>닫기</Text>
+                        </Pressable>
+                    </View>
                 </View>
-            </SafeAreaView>
-        </>
+
+                <View style={{ height: 12 }} />
+
+                <View style={{ flex: 1, backgroundColor: "#fff", borderRadius: 18, overflow: "hidden" }}>
+                    {loading ? (
+                        <View style={{ paddingTop: 26, alignItems: "center" }}>
+                            <ActivityIndicator />
+                        </View>
+                    ) : (
+                        <FlatList
+                            data={items}
+                            keyExtractor={(it) => it.id}
+                            renderItem={renderItem}
+                            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refresh} />}
+                            onEndReachedThreshold={0.4}
+                            onEndReached={loadMore}
+                            ListEmptyComponent={
+                                <View style={{ paddingTop: 40, alignItems: "center" }}>
+                                    <Text style={{ color: "#6B7280", fontWeight: "800" }}>
+                                        {error ? "목록을 불러오지 못했어요." : "차단한 메뉴가 없어요."}
+                                    </Text>
+                                </View>
+                            }
+                            ListFooterComponent={
+                                loadingMore ? (
+                                    <View style={{ paddingVertical: 14 }}>
+                                        <ActivityIndicator />
+                                    </View>
+                                ) : (
+                                    <View style={{ height: Math.max(16, insets.bottom) }} />
+                                )
+                            }
+                        />
+                    )}
+                </View>
+            </View>
+        </SafeAreaView>
     );
 }

@@ -10,6 +10,7 @@ import {
     View,
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
+import { useRouter } from "expo-router";
 
 import { useAuth } from "../../src/auth/authStore";
 import { useIngredientsStore } from "../../src/ingredients/ingredientsStore";
@@ -26,6 +27,8 @@ function toast(msg: string) {
 }
 
 export default function IngredientsScreen() {
+    const router = useRouter();
+
     // ✅ 너희 authStore에서 token 키가 다르면 여기만 바꾸면 됨
     const { token } = useAuth();
 
@@ -113,6 +116,20 @@ export default function IngredientsScreen() {
                     <Text style={{ color: "#111", fontWeight: "700" }}>초기화</Text>
                 </Pressable>
             </View>
+
+            {/* ✅ 차단 메뉴 관리 */}
+            <View style={{ height: 10 }} />
+            <Pressable
+                onPress={() => router.push("/blocked")}
+                style={{
+                    paddingVertical: 12,
+                    borderRadius: 12,
+                    backgroundColor: "#111",
+                    alignItems: "center",
+                }}
+            >
+                <Text style={{ color: "#fff", fontWeight: "800" }}>차단 메뉴 관리</Text>
+            </Pressable>
 
             <View style={{ height: 12 }} />
 

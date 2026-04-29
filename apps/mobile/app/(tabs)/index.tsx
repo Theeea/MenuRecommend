@@ -89,7 +89,7 @@ export default function Home() {
         try {
             await loadQuota();
             await refreshProof();
-        } catch (e: any) {
+        } catch {
             Alert.alert("동기화 실패", `API 연결을 확인해줘.\n\nAPI_BASE_URL: ${API_BASE_URL}`);
         } finally {
             setRefreshing(false);
@@ -199,8 +199,9 @@ export default function Home() {
                 }
             }
 
-            Alert.alert("처리 완료", "이 메뉴는 앞으로 추천에서 제외할게.");
             setRec(null);
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            await recommend();
         } catch (e: any) {
             const status = e?.response?.status;
             if (status === 401) {
@@ -210,7 +211,7 @@ export default function Home() {
             }
             Alert.alert("실패", "잠시 후 다시 시도해줘.");
         }
-    }, [rec, router]);
+    }, [rec, recommend, router]);
 
     const goProof = useCallback(async () => {
         if (!rec) return;
@@ -251,7 +252,8 @@ export default function Home() {
 
         if (proofQuota.code === "VERIFY_COOLDOWN" && proofQuota.nextAvailableAt) {
             const next = new Date(proofQuota.nextAvailableAt).getTime();
-            const remainMs = next - Date.now();
+            const now = Date.now() + tick * 0;
+            const remainMs = next - now;
             return {
                 disabled: true,
                 helper: `쿨타임 남음 · ${msToKoreanRemain(remainMs)} 후 가능`,
@@ -388,18 +390,20 @@ export default function Home() {
                             <View style={{ height: 12 }} />
 
                             <View style={{ flexDirection: "row", gap: 10 }}>
-                                <Pressable
-                                    onPress={blockMenu}
-                                    style={{
-                                        flex: 1,
-                                        paddingVertical: 12,
-                                        borderRadius: 14,
-                                        backgroundColor: "#F2F2F2",
-                                        alignItems: "center",
-                                    }}
-                                >
-                                    <Text style={{ fontWeight: "900", color: "#111" }}>싫어요</Text>
-                                </Pressable>
+                                {rec.session.status !== "ACCEPTED" ? (
+                                    <Pressable
+                                        onPress={blockMenu}
+                                        style={{
+                                            flex: 1,
+                                            paddingVertical: 12,
+                                            borderRadius: 14,
+                                            backgroundColor: "#F2F2F2",
+                                            alignItems: "center",
+                                        }}
+                                    >
+                                        <Text style={{ fontWeight: "900", color: "#111" }}>싫어요 / 다시 추천</Text>
+                                    </Pressable>
+                                ) : null}
 
                                 {rec.session.status !== "ACCEPTED" ? (
                                     <Pressable
