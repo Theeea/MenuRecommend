@@ -7,6 +7,16 @@ export const api = axios.create({
     timeout: 15000,
 });
 
+export async function apiGet<T>(path: string): Promise<T> {
+    const { data } = await api.get<T>(path);
+    return data;
+}
+
+export async function apiPost<T>(path: string, body?: unknown): Promise<T> {
+    const { data } = await api.post<T>(path, body);
+    return data;
+}
+
 api.interceptors.request.use(async (config) => {
     const token = await getToken();
     if (token) {

@@ -86,8 +86,9 @@ pnpm --filter mobile exec tsc --noEmit
 
 주의:
 
-- 현재 전체 모바일 typecheck는 레거시 파일 때문에 실패할 수 있습니다.
-- 변경 파일 lint는 우선 통과시킵니다.
+- 현재 모바일 전체 typecheck는 통과해야 합니다.
+- expo-router 구조에서 사용하지 않는 이전 `App.tsx`, `src/navigation/**`, `src/screens/**`는 `apps/mobile/tsconfig.json`의 `exclude`에 포함되어 있습니다.
+- 새 모바일 코드는 `app/**`와 실제 사용 중인 `src/**` 기준으로 작성합니다.
 
 ## 환경변수
 

@@ -353,11 +353,11 @@ pnpm --filter mobile exec eslint --no-cache app/proof.tsx 'app/(tabs)/index.tsx'
 pnpm --filter mobile exec tsc --noEmit
 ```
 
-현재 알려진 모바일 타입체크 이슈:
+모바일 타입체크 기준:
 
-- 전체 `pnpm --filter mobile exec tsc --noEmit`은 레거시 파일 때문에 실패할 수 있습니다.
-- 관련 경로는 `src/navigation`, `src/screens`, `src/api/recommend.ts`, `app/points.tsx`입니다.
-- 레거시 경로 정리 전에는 변경 파일 중심으로 ESLint를 우선 실행합니다.
+- 전체 `pnpm --filter mobile exec tsc --noEmit`은 통과해야 합니다.
+- expo-router 구조에서 사용하지 않는 이전 `App.tsx`, `src/navigation/**`, `src/screens/**`는 `apps/mobile/tsconfig.json`에서 제외합니다.
+- 변경 파일은 ESLint도 함께 확인합니다.
 
 ## 12. 유지보수 규칙
 
@@ -463,7 +463,7 @@ pnpm --filter api typecheck
 pnpm --filter mobile exec eslint --no-cache <changed files>
 ```
 
-전체 모바일 타입체크를 돌릴 때는 현재 레거시 오류를 먼저 감안합니다.
+전체 모바일 타입체크도 함께 통과해야 합니다.
 
 ### 12.10 관리자 키는 헤더만 사용한다
 
@@ -503,7 +503,7 @@ query string으로 관리자 키를 받는 코드를 추가하지 않습니다.
 
 추가 개선 항목:
 
-- 레거시 모바일 타입체크 오류 정리
+- 모바일 변경 후 전체 타입체크 통과 유지
 - 어드민 HOLD 필터와 사유 배지 개선
 - 운영 worker 방식 결정: OS cron, node-cron, BullMQ
 - 어드민 리뷰 및 포인트 조정 audit log 추가
@@ -519,13 +519,12 @@ query string으로 관리자 키를 받는 코드를 추가하지 않습니다.
 
 ## 14. 다음 유지보수 추천 순서
 
-1. 레거시 모바일 타입체크 오류 정리
-2. `ProofService.createQueued` 단위 테스트 추가
-3. Proof 포인트 중복 지급 방지 테스트 추가
-4. 어드민 리뷰 audit log 추가
-5. Proof worker retry/max attempts 정책 추가
-6. 운영 cron 또는 queue 방식 결정
-7. 업로드 검증과 raw 이미지 접근 정책 강화
+1. `ProofService.createQueued` 단위 테스트 추가
+2. Proof 포인트 중복 지급 방지 테스트 추가
+3. 어드민 리뷰 audit log 추가
+4. Proof worker retry/max attempts 정책 추가
+5. 운영 cron 또는 queue 방식 결정
+6. 업로드 검증과 raw 이미지 접근 정책 강화
 
 ## 15. 빠른 디버깅 가이드
 

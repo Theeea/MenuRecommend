@@ -121,18 +121,25 @@ API:
 - 수동 fetch를 사용할 때 `Bearer Bearer <token>`이 되지 않게 정규화합니다.
 - axios client를 쓰는 경우 `src/api/client.ts`의 interceptor를 확인합니다.
 
-## 현재 알려진 모바일 타입체크 이슈
+## 모바일 타입체크 기준
 
-전체 `tsc --noEmit`은 레거시 경로 때문에 실패할 수 있습니다.
+현재 모바일 전체 타입체크는 통과해야 합니다.
 
-관련 경로:
+실행:
 
-- `src/navigation`
-- `src/screens`
-- `src/api/recommend.ts`
-- `app/points.tsx`
+```bash
+pnpm --filter mobile exec tsc --noEmit
+```
 
-변경 파일 확인은 우선 아래처럼 수행합니다.
+expo-router 구조에서 사용하지 않는 이전 React Navigation 경로는 `apps/mobile/tsconfig.json`에서 제외되어 있습니다.
+
+제외 경로:
+
+- `App.tsx`
+- `src/navigation/**`
+- `src/screens/**`
+
+변경 파일 lint:
 
 ```bash
 pnpm --filter mobile exec eslint --no-cache app/proof.tsx 'app/(tabs)/index.tsx' 'app/(tabs)/points.tsx'

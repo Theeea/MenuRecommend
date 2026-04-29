@@ -13,5 +13,10 @@
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
+  ],
+  "exclude": [
+    "App.tsx",
+    "src/navigation/**",
+    "src/screens/**"
   ]
 }

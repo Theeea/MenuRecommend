@@ -68,12 +68,21 @@
 
 ## 모바일 전체 타입체크 실패
 
-현재 알려진 레거시 이슈:
+현재 기준으로 아래 명령은 통과해야 합니다.
 
-- `src/navigation`
-- `src/screens`
-- `src/api/recommend.ts`
-- `app/points.tsx`
+```bash
+pnpm --filter mobile exec tsc --noEmit
+```
 
-우선 변경 파일 lint를 통과시킵니다.
-레거시 타입체크 정리는 별도 작업으로 분리합니다.
+실패하면 먼저 확인할 것:
+
+1. 새로 추가한 `app/**` 라우트 파일의 타입 오류
+2. 새로 추가한 `src/**` 파일의 import/export 불일치
+3. `apps/mobile/tsconfig.json`의 `exclude` 설정 변경 여부
+4. expo-router에서 사용하지 않는 이전 React Navigation 파일을 다시 include했는지 여부
+
+현재 제외된 레거시 경로:
+
+- `App.tsx`
+- `src/navigation/**`
+- `src/screens/**`

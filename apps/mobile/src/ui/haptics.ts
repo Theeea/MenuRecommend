@@ -6,6 +6,8 @@ export async function hTap() {
     } catch {}
 }
 
+export const hapticTap = hTap;
+
 export async function hSuccess() {
     try {
         await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
