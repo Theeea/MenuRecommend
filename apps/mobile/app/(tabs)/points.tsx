@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     ActivityIndicator,
+    Alert,
     FlatList,
     Image,
     Modal,
@@ -60,6 +61,33 @@ type ProofItem = {
 
     // 서버가 그대로 내려줄 수도 있는 레거시 필드 대비(타입엔 안 쓰지만 any로 접근)
     // aiMeta?: any;
+};
+
+type ShopItem = {
+    id: string;
+    name: string;
+    description?: string | null;
+    category?: string | null;
+    pricePoints: number;
+    imageUrl?: string | null;
+    stock?: number | null;
+};
+
+type PurchaseItem = {
+    id: string;
+    points: number;
+    status: "REQUESTED" | "SENT" | "CANCELLED";
+    createdAt: string;
+    fulfilledAt?: string | null;
+    cancelledAt?: string | null;
+    shopItem?: {
+        id: string;
+        name: string;
+        description?: string | null;
+        category?: string | null;
+        imageUrl?: string | null;
+    } | null;
+    itemSnapshot?: any;
 };
 
 type TimelineItem =
@@ -319,6 +347,9 @@ export default function PointsScreen() {
     const [ledgerNextCursor, setLedgerNextCursor] = useState<string | null>(null);
 
     const [proofs, setProofs] = useState<ProofItem[]>([]);
+    const [shopItems, setShopItems] = useState<ShopItem[]>([]);
+    const [purchases, setPurchases] = useState<PurchaseItem[]>([]);
+    const [purchasingId, setPurchasingId] = useState<string | null>(null);
 
     const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
@@ -406,6 +437,21 @@ export default function PointsScreen() {
         setProofs(items);
     };
 
+    const loadShop = async () => {
+        try {
+            const [itemsRes, purchasesRes] = await Promise.all([
+                apiFetch<any>("/shop/items", tokenRaw),
+                apiFetch<any>("/me/purchases?take=5", tokenRaw),
+            ]);
+            setUsedUrl(itemsRes.usedUrl);
+            setShopItems(itemsRes.data?.items ?? itemsRes.data?.data?.items ?? []);
+            setPurchases(purchasesRes.data?.items ?? purchasesRes.data?.data?.items ?? []);
+        } catch {
+            setShopItems([]);
+            setPurchases([]);
+        }
+    };
+
     const handle401 = () => {
         setError("세션이 만료되었거나 토큰이 유효하지 않아요. 로그아웃 후 다시 로그인해 주세요.");
     };
@@ -416,7 +462,7 @@ export default function PointsScreen() {
         setRefreshing(true);
         setError(null);
         try {
-            await Promise.all([loadBalance(), loadLedger(null, false), loadProofs()]);
+            await Promise.all([loadBalance(), loadLedger(null, false), loadProofs(), loadShop()]);
         } catch (e: any) {
             if (e?.status === 401 || String(e?.message ?? "").includes("HTTP 401")) handle401();
             else setError(String(e?.message ?? e));
@@ -464,6 +510,44 @@ export default function PointsScreen() {
         refreshAll(false).finally(() => setLoading(false));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [canCallApi]);
+
+    const purchaseShopItem = async (item: ShopItem) => {
+        if (purchasingId) return;
+        if (balance < item.pricePoints) {
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            Alert.alert("포인트 부족", `${fmtNumber(item.pricePoints)}P가 필요해요.`);
+            return;
+        }
+
+        Alert.alert("구매 요청", `${item.name}\n${fmtNumber(item.pricePoints)}P를 사용할까요?`, [
+            { text: "취소", style: "cancel" },
+            {
+                text: "구매",
+                onPress: async () => {
+                    setPurchasingId(item.id);
+                    try {
+                        const r = await apiFetch<any>("/shop/purchase", tokenRaw, {
+                            method: "POST",
+                            body: JSON.stringify({ itemId: item.id }),
+                        });
+                        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+                        setBalance(Number(r.data?.balance ?? balance - item.pricePoints) || 0);
+                        await Promise.all([loadLedger(null, false), loadShop()]);
+                        Alert.alert("구매 요청 완료", "관리자가 확인 후 모바일교환권을 발송할 예정이에요.");
+                    } catch (e: any) {
+                        await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+                        if (e?.status === 409) {
+                            Alert.alert("구매 실패", "포인트가 부족하거나 상품 재고가 없어요.");
+                        } else {
+                            Alert.alert("구매 실패", String(e?.message ?? e));
+                        }
+                    } finally {
+                        setPurchasingId(null);
+                    }
+                },
+            },
+        ]);
+    };
 
     const timeline: TimelineItem[] = useMemo(() => {
         const a: TimelineItem[] = [];
@@ -803,28 +887,134 @@ export default function PointsScreen() {
             >
                 {/* 사용 */}
                 <View style={{ width, flex: 1, paddingHorizontal: 16 }}>
-                    <View style={{ backgroundColor: CARD_BG, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: "#F1E8E0" }}>
-                        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
-                            <View
-                                style={{
-                                    width: 38,
-                                    height: 38,
-                                    borderRadius: 14,
-                                    backgroundColor: "#FFF1EE",
-                                    alignItems: "center",
-                                    justifyContent: "center",
-                                }}
-                            >
-                                <Ionicons name="gift-outline" size={20} color="#FF4D2D" />
-                            </View>
-                            <View style={{ flex: 1 }}>
-                                <Text style={{ fontSize: 15, fontWeight: "900", color: "#111" }}>포인트 사용 준비중</Text>
-                                <Text style={{ marginTop: 4, color: "#6B7280", lineHeight: 18 }}>
-                                    기프티콘과 아이템 구매 기능을 붙일 예정이에요.
-                                </Text>
+                    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+                        <View style={{ backgroundColor: CARD_BG, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: "#F1E8E0" }}>
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                                <View
+                                    style={{
+                                        width: 38,
+                                        height: 38,
+                                        borderRadius: 14,
+                                        backgroundColor: "#FFF1EE",
+                                        alignItems: "center",
+                                        justifyContent: "center",
+                                    }}
+                                >
+                                    <Ionicons name="gift-outline" size={20} color="#FF4D2D" />
+                                </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text style={{ fontSize: 15, fontWeight: "900", color: "#111" }}>포인트 사용</Text>
+                                    <Text style={{ marginTop: 4, color: "#6B7280", lineHeight: 18 }}>
+                                        구매 요청 후 관리자가 확인해 모바일교환권을 발송합니다.
+                                    </Text>
+                                </View>
                             </View>
                         </View>
-                    </View>
+
+                        <View style={{ height: 12 }} />
+
+                        {shopItems.length ? (
+                            shopItems.map((item) => {
+                                const canBuy = balance >= item.pricePoints && item.stock !== 0;
+                                const busy = purchasingId === item.id;
+                                return (
+                                    <View
+                                        key={item.id}
+                                        style={{
+                                            backgroundColor: CARD_BG,
+                                            borderRadius: 18,
+                                            padding: 14,
+                                            borderWidth: 1,
+                                            borderColor: "#F1E8E0",
+                                            marginBottom: 10,
+                                            flexDirection: "row",
+                                            gap: 12,
+                                            alignItems: "center",
+                                        }}
+                                    >
+                                        <View
+                                            style={{
+                                                width: 54,
+                                                height: 54,
+                                                borderRadius: 16,
+                                                backgroundColor: "#F3F4F6",
+                                                alignItems: "center",
+                                                justifyContent: "center",
+                                                overflow: "hidden",
+                                            }}
+                                        >
+                                            {item.imageUrl ? (
+                                                <Image source={{ uri: toAbsoluteUrl(item.imageUrl) }} style={{ width: 54, height: 54 }} />
+                                            ) : (
+                                                <Ionicons name="ticket-outline" size={24} color="#111827" />
+                                            )}
+                                        </View>
+
+                                        <View style={{ flex: 1, minWidth: 0 }}>
+                                            <Text numberOfLines={1} style={{ fontSize: 15, fontWeight: "900", color: "#111827" }}>
+                                                {item.name}
+                                            </Text>
+                                            {!!item.description && (
+                                                <Text numberOfLines={2} style={{ marginTop: 4, fontSize: 12, color: "#6B7280", lineHeight: 17 }}>
+                                                    {item.description}
+                                                </Text>
+                                            )}
+                                            <Text style={{ marginTop: 6, fontSize: 13, fontWeight: "900", color: "#111827" }}>
+                                                {fmtNumber(item.pricePoints)}P
+                                                {item.stock != null ? ` · 남은 수량 ${item.stock}` : ""}
+                                            </Text>
+                                        </View>
+
+                                        <Pressable
+                                            onPress={() => purchaseShopItem(item)}
+                                            disabled={!canBuy || busy}
+                                            style={{
+                                                paddingVertical: 10,
+                                                paddingHorizontal: 12,
+                                                borderRadius: 12,
+                                                backgroundColor: canBuy ? INK : "#E5E7EB",
+                                                minWidth: 70,
+                                                alignItems: "center",
+                                            }}
+                                        >
+                                            <Text style={{ color: canBuy ? "#fff" : "#6B7280", fontWeight: "900", fontSize: 12 }}>
+                                                {busy ? "처리중" : canBuy ? "구매" : item.stock === 0 ? "품절" : "부족"}
+                                            </Text>
+                                        </Pressable>
+                                    </View>
+                                );
+                            })
+                        ) : (
+                            <View style={{ paddingVertical: 34, alignItems: "center" }}>
+                                <Text style={{ color: "#6B7280", fontWeight: "700" }}>구매 가능한 상품이 아직 없어요.</Text>
+                            </View>
+                        )}
+
+                        {!!purchases.length && (
+                            <View style={{ marginTop: 4, backgroundColor: CARD_BG, borderRadius: 18, padding: 14, borderWidth: 1, borderColor: "#F1E8E0" }}>
+                                <Text style={{ fontSize: 14, fontWeight: "900", color: "#111827" }}>최근 구매 요청</Text>
+                                <View style={{ height: 8 }} />
+                                {purchases.map((p) => {
+                                    const name = p.shopItem?.name ?? p.itemSnapshot?.name ?? "상품";
+                                    const status =
+                                        p.status === "SENT" ? "발송 완료" : p.status === "CANCELLED" ? "취소됨" : "발송 대기";
+                                    return (
+                                        <View key={p.id} style={{ paddingVertical: 8, borderTopWidth: 1, borderColor: "#F3F4F6" }}>
+                                            <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
+                                                <Text numberOfLines={1} style={{ flex: 1, fontWeight: "800", color: "#111827" }}>
+                                                    {name}
+                                                </Text>
+                                                <Text style={{ fontSize: 12, color: "#6B7280" }}>{fmtShortDate(p.createdAt)}</Text>
+                                            </View>
+                                            <Text style={{ marginTop: 4, fontSize: 12, color: "#6B7280" }}>
+                                                {status} · -{fmtNumber(p.points)}P
+                                            </Text>
+                                        </View>
+                                    );
+                                })}
+                            </View>
+                        )}
+                    </ScrollView>
                     <View style={{ height: 24 }} />
                 </View>
 

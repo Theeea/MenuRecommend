@@ -13,6 +13,7 @@
 - `GET /admin/points`
 - `GET /admin/api/review/list`
 - `GET /admin/proofs`
+- `GET /admin/shop/page`
 - `POST /proofs/:id/review`
 
 ## 이미지 정책
@@ -100,6 +101,34 @@ body:
 - `PASS`면 포인트를 지급합니다.
 - `PASS` 또는 `FAIL`이면 세션을 `DONE`으로 변경합니다.
 - 이미 최종 상태면 idempotent하게 응답해야 합니다.
+
+## 포인트 상품 관리
+
+화면:
+
+```text
+GET /admin/shop/page
+```
+
+기능:
+
+- 상품 등록
+- 상품 수정
+- 상품 삭제/숨김
+- 이미지 URL 등록
+- 가격 포인트 설정
+- 재고 설정
+- 노출 순서 설정
+- 구매 요청 조회
+- 모바일교환권 발송 완료 처리
+
+MVP 정책:
+
+- 상품 삭제는 실제 삭제가 아니라 `INACTIVE` 숨김 처리입니다.
+- 기존 구매 내역 보존을 위해 `ShopItem` row를 제거하지 않습니다.
+- 이미지 파일 업로드는 아직 붙이지 않고 `imageUrl` 입력으로 관리합니다.
+- 구매 요청은 `REQUESTED` 상태로 쌓이고, 관리자가 발송 후 `SENT`로 변경합니다.
+- 취소/환불 관리는 후속 작업입니다.
 
 ## Template string 주의
 

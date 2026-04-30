@@ -104,6 +104,17 @@ enum PointSource {
   SYSTEM
 }
 
+enum ShopItemStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum PurchaseStatus {
+  REQUESTED
+  SENT
+  CANCELLED
+}
+
 model User {
   id       String @id @default(cuid())
   email    String @unique
@@ -114,6 +125,7 @@ model User {
 
   pointBalance Int           @default(0)
   pointLedgers PointLedger[]
+  purchases    UserPurchase[]
 
   menuBlocks      UserMenuBlock[]
   recommendQuotas DailyRecommendQuota[]
@@ -284,6 +296,49 @@ model PointLedger {
 
   @@index([userId, createdAt])
   @@index([source, sourceId])
+}
+
+model ShopItem {
+  id          String         @id @default(cuid())
+  name        String
+  description String?
+  category    String        @default("GIFTICON")
+  pricePoints Int
+  imageUrl    String?
+  status      ShopItemStatus @default(ACTIVE)
+  stock       Int?
+  sortOrder   Int           @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  purchases UserPurchase[]
+
+  @@index([status, sortOrder])
+  @@index([category, status])
+}
+
+model UserPurchase {
+  id         String         @id @default(cuid())
+  userId     String
+  shopItemId String
+
+  points        Int
+  status        PurchaseStatus @default(REQUESTED)
+  itemSnapshot  Json?
+  fulfillmentMeta Json?
+  fulfilledAt   DateTime?
+  cancelledAt   DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  shopItem ShopItem @relation(fields: [shopItemId], references: [id], onDelete: Restrict)
+
+  @@index([userId, createdAt])
+  @@index([status, createdAt])
+  @@index([shopItemId, createdAt])
 }
 
 model AdminUser {

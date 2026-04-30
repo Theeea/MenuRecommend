@@ -11,6 +11,7 @@ import { IngredientModule } from "./ingredient/ingredient.module";
 import { ProofModule } from "./proof/proof.module";
 import { UploadsModule } from "./uploads/uploads.module";
 import { AdminModule } from "./admin/admin.module";
+import { ShopModule } from "./shop/shop.module";
 
 function resolveUploadsRoot() {
   // 실행 cwd가 apps/api일 수도, repo root일 수도 있어서 둘 다 대응
@@ -43,6 +44,7 @@ const uploadsRoot = resolveUploadsRoot();
     ProofModule,
     UploadsModule,
     AdminModule,
+    ShopModule,
   ],
 })
 export class AppModule {}

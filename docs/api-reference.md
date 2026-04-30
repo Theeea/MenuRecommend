@@ -198,6 +198,24 @@
 - 관리자 판정 정정 ledger는 `source=ADMIN`이므로 제외하지 않습니다.
 - 정정 ledger는 `인증 판정 정정 <음식명>/<YY.MM.DD>` 형태로 보여줍니다.
 
+### `GET /me/purchases`
+
+역할:
+
+- 내 포인트 상품 구매 요청 목록을 반환합니다.
+- 모바일 포인트 사용 탭의 최근 구매 요청 영역에서 사용합니다.
+
+쿼리:
+
+- `take`
+- `cursor`
+
+상태:
+
+- `REQUESTED`: 구매 요청됨, 관리자 발송 대기
+- `SENT`: 모바일교환권 발송 완료
+- `CANCELLED`: 취소됨
+
 ### `/me/blocked-menus`
 
 차단 메뉴 API:
@@ -225,6 +243,52 @@
 역할:
 
 - 포인트 관리 또는 조회 화면입니다.
+
+## Shop
+
+### `GET /shop/items`
+
+역할:
+
+- 구매 가능한 포인트 상품 목록을 반환합니다.
+- `ACTIVE` 상품만 내려줍니다.
+
+응답 필드:
+
+- `id`
+- `name`
+- `description`
+- `category`
+- `pricePoints`
+- `imageUrl`
+- `stock`
+
+### `POST /shop/purchase`
+
+역할:
+
+- 포인트 상품 구매 요청을 생성합니다.
+- 구매 즉시 포인트를 차감합니다.
+- `UserPurchase`를 `REQUESTED` 상태로 생성합니다.
+- `PointLedger`에 `SPEND / REDEEM` 차감 내역을 남깁니다.
+
+요청:
+
+```json
+{
+  "itemId": "shop_item_id"
+}
+```
+
+정책 에러:
+
+- `SHOP_INSUFFICIENT_POINTS`: 포인트 부족
+- `SHOP_OUT_OF_STOCK`: 재고 없음
+
+운영 정책:
+
+- MVP에서는 구매 즉시 포인트를 차감하고, 관리자가 나중에 모바일교환권을 발송합니다.
+- 발송/취소 관리 화면은 후속 작업입니다.
 
 ## 라우트 변경 규칙
 

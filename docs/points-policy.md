@@ -70,18 +70,36 @@ PROOF:PASS:<proofId>
 - Proof 카드와 ledger 카드가 중복될 수 있습니다.
 - 모바일에서는 `source=PROOF` ledger row를 제외합니다.
 
-## 추후 포인트 사용
+## 포인트 사용 MVP
 
-예상 API:
+API:
 
 - `GET /shop/items`
 - `POST /shop/purchase`
 - `GET /me/purchases`
 
-구현 시 필요한 정책:
+포인트 사용 MVP는 상품 구매 요청 방식입니다.
 
-- 잔액 부족 방지
-- 중복 구매 방지
-- 구매 내역 저장
-- `PointLedger`에 `SPEND` 내역 기록
-- 환불 또는 취소 정책
+흐름:
+
+1. 유저가 포인트 사용 탭에서 상품을 선택합니다.
+2. `POST /shop/purchase`를 호출합니다.
+3. 서버가 잔액과 재고를 확인합니다.
+4. 포인트를 즉시 차감합니다.
+5. `UserPurchase`를 `REQUESTED` 상태로 생성합니다.
+6. `PointLedger`에 `SPEND / REDEEM` 차감 내역을 기록합니다.
+7. 관리자가 추후 모바일교환권을 발송하고 상태를 `SENT`로 변경합니다.
+
+현재 상태:
+
+- `REQUESTED`: 구매 요청 완료, 발송 대기
+- `SENT`: 발송 완료
+- `CANCELLED`: 취소
+
+주의:
+
+- 포인트 차감과 구매 요청 생성은 같은 트랜잭션에서 처리합니다.
+- 잔액 부족이면 구매 요청을 만들지 않습니다.
+- 재고가 0이면 구매 요청을 만들지 않습니다.
+- MVP에서는 취소/환불 관리자 기능은 후속 작업입니다.
+- 인증 판정 정정과 달리 구매 ledger는 `source=REDEEM`이므로 모바일 내역에 그대로 표시합니다.

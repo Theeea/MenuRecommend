@@ -214,7 +214,343 @@ export class AdminController {
     return this.menuDrafts.reject(adminKey, id, body);
   }
 
+  @Get('shop/items')
+  async adminShopItems(@Headers('x-admin-key') adminKey?: string) {
+    assertAdminKey(adminKey);
+    const items = await (this.prisma as any).shopItem.findMany({
+      orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
+    });
+    return { ok: true, items };
+  }
+
+  @Post('shop/items')
+  async adminCreateShopItem(
+    @Headers('x-admin-key') adminKey: string | undefined,
+    @Body()
+    body: {
+      name?: string;
+      description?: string;
+      category?: string;
+      pricePoints?: unknown;
+      imageUrl?: string;
+      stock?: unknown;
+      sortOrder?: unknown;
+      status?: string;
+    },
+  ) {
+    assertAdminKey(adminKey);
+    const name = String(body?.name ?? '').trim();
+    const pricePoints = Math.trunc(Number(body?.pricePoints));
+    if (!name) throw new BadRequestException('name is required');
+    if (!Number.isFinite(pricePoints) || pricePoints <= 0) {
+      throw new BadRequestException('pricePoints must be positive');
+    }
+
+    const stockRaw = String(body?.stock ?? '').trim();
+    const stock =
+      stockRaw === '' ? null : Math.max(0, Math.trunc(Number(stockRaw) || 0));
+
+    const item = await (this.prisma as any).shopItem.create({
+      data: {
+        name,
+        description: String(body?.description ?? '').trim() || null,
+        category: String(body?.category ?? 'GIFTICON').trim() || 'GIFTICON',
+        pricePoints,
+        imageUrl: String(body?.imageUrl ?? '').trim() || null,
+        stock,
+        sortOrder: Math.trunc(Number(body?.sortOrder ?? 0)) || 0,
+        status: body?.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
+      },
+    });
+    return { ok: true, item };
+  }
+
+  @Post('shop/items/:id')
+  async adminUpdateShopItem(
+    @Headers('x-admin-key') adminKey: string | undefined,
+    @Param('id') id: string,
+    @Body()
+    body: {
+      name?: string;
+      description?: string;
+      category?: string;
+      pricePoints?: unknown;
+      imageUrl?: string;
+      stock?: unknown;
+      sortOrder?: unknown;
+      status?: string;
+    },
+  ) {
+    assertAdminKey(adminKey);
+    const name = String(body?.name ?? '').trim();
+    const pricePoints = Math.trunc(Number(body?.pricePoints));
+    if (!name) throw new BadRequestException('name is required');
+    if (!Number.isFinite(pricePoints) || pricePoints <= 0) {
+      throw new BadRequestException('pricePoints must be positive');
+    }
+
+    const stockRaw = String(body?.stock ?? '').trim();
+    const stock =
+      stockRaw === '' ? null : Math.max(0, Math.trunc(Number(stockRaw) || 0));
+
+    const item = await (this.prisma as any).shopItem.update({
+      where: { id },
+      data: {
+        name,
+        description: String(body?.description ?? '').trim() || null,
+        category: String(body?.category ?? 'GIFTICON').trim() || 'GIFTICON',
+        pricePoints,
+        imageUrl: String(body?.imageUrl ?? '').trim() || null,
+        stock,
+        sortOrder: Math.trunc(Number(body?.sortOrder ?? 0)) || 0,
+        status: body?.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
+      },
+    });
+    return { ok: true, item };
+  }
+
+  @Post('shop/items/:id/delete')
+  async adminDeleteShopItem(
+    @Headers('x-admin-key') adminKey: string | undefined,
+    @Param('id') id: string,
+  ) {
+    assertAdminKey(adminKey);
+    const item = await (this.prisma as any).shopItem.update({
+      where: { id },
+      data: { status: 'INACTIVE' },
+    });
+    return { ok: true, item };
+  }
+
+  @Get('shop/purchases')
+  async adminShopPurchases(
+    @Headers('x-admin-key') adminKey: string | undefined,
+    @Query('status') status?: string,
+    @Query('take') take?: string,
+  ) {
+    assertAdminKey(adminKey);
+    const s = String(status ?? 'REQUESTED').toUpperCase();
+    const where = s === 'ALL' ? {} : { status: s };
+    const items = await (this.prisma as any).userPurchase.findMany({
+      where,
+      take: clamp(toInt(take, 50), 1, 100),
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: { select: { id: true, email: true, pointBalance: true } },
+        shopItem: { select: { id: true, name: true, imageUrl: true } },
+      },
+    });
+    return { ok: true, items };
+  }
+
+  @Post('shop/purchases/:id/sent')
+  async adminMarkPurchaseSent(
+    @Headers('x-admin-key') adminKey: string | undefined,
+    @Param('id') id: string,
+    @Body() body?: { memo?: string; code?: string },
+  ) {
+    assertAdminKey(adminKey);
+    const item = await (this.prisma as any).userPurchase.update({
+      where: { id },
+      data: {
+        status: 'SENT',
+        fulfilledAt: new Date(),
+        fulfillmentMeta: {
+          memo: String(body?.memo ?? '').trim() || null,
+          code: String(body?.code ?? '').trim() || null,
+        },
+      },
+    });
+    return { ok: true, item };
+  }
+
   // -------------------- PAGES --------------------
+
+  @Get('shop/page')
+  shopPage() {
+    return `
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="robots" content="noindex,nofollow"/>
+  <title>Shop Admin</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,sans-serif;margin:0;background:#f6f6f8;color:#111}
+    header{position:sticky;top:0;background:#fff;border-bottom:1px solid #eee;padding:12px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;z-index:10}
+    .nav a{display:inline-block;padding:10px 12px;border-radius:10px;background:#111;color:#fff;font-weight:900;text-decoration:none}
+    .nav a.secondary{background:#666}
+    input,select,textarea{padding:10px 12px;border:1px solid #ddd;border-radius:10px;font:inherit;background:#fff}
+    textarea{min-height:42px;resize:vertical}
+    button{padding:10px 12px;border:0;border-radius:10px;background:#111;color:#fff;font-weight:900;cursor:pointer}
+    button.secondary{background:#666}
+    button.fail{background:#c62828}
+    button.pass{background:#0a7a2f}
+    main{padding:16px;max-width:1280px;margin:0 auto}
+    .box{background:#fff;border:1px solid #eee;border-radius:16px;padding:12px;margin-bottom:12px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px}
+    .card{background:#fff;border:1px solid #eee;border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:10px}
+    .title{font-size:18px;font-weight:900}
+    .muted{color:#666;font-weight:700}
+    .pill{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:#f1f1f1;font-weight:800;margin:2px}
+    img.thumb{width:72px;height:72px;border-radius:14px;object-fit:cover;background:#eee}
+    .formgrid{display:grid;grid-template-columns:1.2fr .8fr .7fr .7fr .7fr;gap:10px}
+    .formgrid input{width:100%;box-sizing:border-box}
+    pre{white-space:pre-wrap;background:#fafafa;border:1px solid #eee;border-radius:12px;padding:10px;margin:0;max-height:140px;overflow:auto}
+  </style>
+</head>
+<body>
+<header>
+  <div class="nav">
+    <a class="secondary" href="/admin/review">Review</a>
+    <a class="secondary" href="/admin/points">Points</a>
+    <a class="secondary" href="/admin/menu-drafts/page">Menu Drafts</a>
+    <a href="/admin/shop/page">Shop</a>
+  </div>
+  <input id="key" placeholder="ADMIN_REVIEW_KEY" />
+  <button onclick="saveKey()">키 저장</button>
+  <span id="status" class="muted" style="margin-left:auto"></span>
+</header>
+<main>
+  <div class="box">
+    <div class="title">상품 등록</div>
+    <div style="height:10px"></div>
+    <div class="formgrid">
+      <input id="name" placeholder="상품명"/>
+      <input id="pricePoints" type="number" min="1" placeholder="가격 포인트"/>
+      <input id="stock" type="number" min="0" placeholder="재고(빈칸=무제한)"/>
+      <input id="sortOrder" type="number" placeholder="순서"/>
+      <select id="statusInput"><option value="ACTIVE">노출</option><option value="INACTIVE">숨김</option></select>
+    </div>
+    <div style="height:10px"></div>
+    <div class="row">
+      <input id="category" placeholder="카테고리" value="GIFTICON"/>
+      <input id="imageUrl" placeholder="이미지 URL" style="min-width:360px"/>
+      <input id="description" placeholder="설명" style="min-width:360px"/>
+      <button onclick="createItem()">등록</button>
+    </div>
+    <div class="muted" style="margin-top:8px">MVP에서는 이미지 파일 업로드 대신 이미지 URL을 등록합니다. 실제 파일 업로드는 signed URL/검증 정책 후 붙입니다.</div>
+  </div>
+
+  <div class="box">
+    <div class="row">
+      <div class="title">상품 목록</div>
+      <button class="secondary" onclick="loadItems()">새로고침</button>
+    </div>
+    <div id="items" class="grid" style="margin-top:12px"></div>
+  </div>
+
+  <div class="box">
+    <div class="row">
+      <div class="title">구매 요청</div>
+      <select id="purchaseStatus"><option value="REQUESTED">발송 대기</option><option value="SENT">발송 완료</option><option value="CANCELLED">취소</option><option value="ALL">전체</option></select>
+      <button class="secondary" onclick="loadPurchases()">조회</button>
+    </div>
+    <div id="purchases" class="grid" style="margin-top:12px"></div>
+  </div>
+</main>
+<script>
+  function getKey(){ return (localStorage.getItem("ADMIN_REVIEW_KEY") || "").trim(); }
+  function setStatus(s){ document.getElementById("status").textContent = s || ""; }
+  function saveKey(){ localStorage.setItem("ADMIN_REVIEW_KEY", document.getElementById("key").value.trim()); loadAll(); }
+  function ensureKey(){ const k = getKey(); if(k) return k; const v = prompt("관리자 키를 입력해줘"); if(!v) return ""; localStorage.setItem("ADMIN_REVIEW_KEY", v.trim()); return v.trim(); }
+  async function api(path, opts){
+    const k = ensureKey(); if(!k) throw new Error("ADMIN_REVIEW_KEY required");
+    const res = await fetch(path, { ...(opts||{}), headers: { "content-type":"application/json", ...(opts&&opts.headers?opts.headers:{}), "x-admin-key": k } });
+    const text = await res.text();
+    let json = null; try{ json = text ? JSON.parse(text) : null; }catch{}
+    if(!res.ok) throw new Error(json && json.message ? JSON.stringify(json.message) : text || ("HTTP " + res.status));
+    return json || {};
+  }
+  function esc(s){ return String(s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;"); }
+  function itemBody(prefix){
+    const id = prefix ? prefix + "-" : "";
+    return {
+      name: document.getElementById(id+"name").value,
+      description: document.getElementById(id+"description").value,
+      category: document.getElementById(id+"category").value,
+      pricePoints: Number(document.getElementById(id+"pricePoints").value),
+      imageUrl: document.getElementById(id+"imageUrl").value,
+      stock: document.getElementById(id+"stock").value,
+      sortOrder: Number(document.getElementById(id+"sortOrder").value || 0),
+      status: document.getElementById(id+"statusInput").value,
+    };
+  }
+  async function createItem(){
+    setStatus("등록중...");
+    try{ await api("/admin/shop/items", { method:"POST", body: JSON.stringify(itemBody("")) }); setStatus(""); loadItems(); }
+    catch(e){ setStatus("에러: " + e.message); alert(e.message); }
+  }
+  async function updateItem(id){
+    setStatus("저장중...");
+    try{ await api("/admin/shop/items/"+encodeURIComponent(id), { method:"POST", body: JSON.stringify(itemBody(id)) }); setStatus(""); loadItems(); }
+    catch(e){ setStatus("에러: " + e.message); alert(e.message); }
+  }
+  async function deleteItem(id){
+    if(!confirm("이 상품을 숨김 처리할까? 기존 구매 내역은 유지됩니다.")) return;
+    try{ await api("/admin/shop/items/"+encodeURIComponent(id)+"/delete", { method:"POST" }); loadItems(); }
+    catch(e){ alert(e.message); }
+  }
+  async function loadItems(){
+    setStatus("상품 불러오는중...");
+    try{
+      const data = await api("/admin/shop/items");
+      const el = document.getElementById("items");
+      el.innerHTML = (data.items||[]).map(it => {
+        const img = it.imageUrl ? '<img class="thumb" src="'+esc(it.imageUrl)+'"/>' : '<div class="thumb"></div>';
+        return '<div class="card">' +
+          '<div class="row">'+img+'<div><div class="title">'+esc(it.name)+'</div><div class="muted">'+esc(it.status)+' · '+esc(it.pricePoints)+'P</div></div></div>' +
+          '<div class="formgrid">' +
+            '<input id="'+esc(it.id)+'-name" value="'+esc(it.name)+'"/>' +
+            '<input id="'+esc(it.id)+'-pricePoints" type="number" value="'+esc(it.pricePoints)+'"/>' +
+            '<input id="'+esc(it.id)+'-stock" type="number" value="'+esc(it.stock ?? '')+'"/>' +
+            '<input id="'+esc(it.id)+'-sortOrder" type="number" value="'+esc(it.sortOrder ?? 0)+'"/>' +
+            '<select id="'+esc(it.id)+'-statusInput"><option value="ACTIVE" '+(it.status==="ACTIVE"?"selected":"")+'>노출</option><option value="INACTIVE" '+(it.status==="INACTIVE"?"selected":"")+'>숨김</option></select>' +
+          '</div>' +
+          '<input id="'+esc(it.id)+'-category" value="'+esc(it.category || 'GIFTICON')+'" placeholder="카테고리"/>' +
+          '<input id="'+esc(it.id)+'-imageUrl" value="'+esc(it.imageUrl || '')+'" placeholder="이미지 URL"/>' +
+          '<input id="'+esc(it.id)+'-description" value="'+esc(it.description || '')+'" placeholder="설명"/>' +
+          '<div class="row"><button onclick="updateItem(\\''+esc(it.id)+'\\')">저장</button><button class="fail" onclick="deleteItem(\\''+esc(it.id)+'\\')">삭제/숨김</button></div>' +
+        '</div>';
+      }).join("") || '<div class="muted">상품이 없습니다.</div>';
+      setStatus("");
+    }catch(e){ setStatus("에러: " + e.message); }
+  }
+  async function loadPurchases(){
+    setStatus("구매 요청 불러오는중...");
+    try{
+      const status = document.getElementById("purchaseStatus").value;
+      const data = await api("/admin/shop/purchases?status="+encodeURIComponent(status));
+      const el = document.getElementById("purchases");
+      el.innerHTML = (data.items||[]).map(p => {
+        const name = p.shopItem ? p.shopItem.name : (p.itemSnapshot && p.itemSnapshot.name) || "상품";
+        return '<div class="card">' +
+          '<div class="title">'+esc(name)+'</div>' +
+          '<div class="row"><span class="pill">'+esc(p.status)+'</span><span class="pill">'+esc(p.points)+'P</span><span class="pill">'+esc(p.createdAt)+'</span></div>' +
+          '<div class="muted">user: '+esc(p.user ? p.user.email : p.userId)+' / balance: '+esc(p.user ? p.user.pointBalance : '-')+'</div>' +
+          '<div class="row"><input id="code-'+esc(p.id)+'" placeholder="교환권 코드/식별값"/><input id="memo-'+esc(p.id)+'" placeholder="발송 메모"/><button class="pass" onclick="markSent(\\''+esc(p.id)+'\\')">발송 완료</button></div>' +
+          '<pre>'+esc(JSON.stringify(p.fulfillmentMeta || p.itemSnapshot || {}, null, 2))+'</pre>' +
+        '</div>';
+      }).join("") || '<div class="muted">구매 요청이 없습니다.</div>';
+      setStatus("");
+    }catch(e){ setStatus("에러: " + e.message); }
+  }
+  async function markSent(id){
+    if(!confirm("발송 완료 처리할까?")) return;
+    try{
+      await api("/admin/shop/purchases/"+encodeURIComponent(id)+"/sent", { method:"POST", body: JSON.stringify({ code: document.getElementById("code-"+id).value, memo: document.getElementById("memo-"+id).value }) });
+      loadPurchases();
+    }catch(e){ alert(e.message); }
+  }
+  function loadAll(){ document.getElementById("key").value = getKey(); loadItems(); loadPurchases(); }
+  if(getKey()) loadAll(); else ensureKey();
+</script>
+</body>
+</html>
+    `.trim();
+  }
 
   // 관리자 Proof 리뷰 페이지
   // 관리자 Proof 리뷰 페이지
@@ -283,6 +619,7 @@ export class AdminController {
     <a href="/admin/review">Review</a>
     <a class="secondary" href="/admin/points">Points</a>
     <a class="secondary" href="/admin/menu-drafts/page">Menu Drafts</a>
+    <a class="secondary" href="/admin/shop/page">Shop</a>
   </div>
   <div style="flex:1"></div>
   <button class="secondary" onclick="openKey()">관리자 키</button>
@@ -765,6 +1102,7 @@ export class AdminController {
     <a class="secondary" href="/admin/review">Proof Review</a>
     <a href="/admin/points">Points</a>
     <a class="secondary" href="/admin/menu-drafts/page">Menu Drafts</a>
+    <a class="secondary" href="/admin/shop/page">Shop</a>
   </div>
 
   <input id="key" placeholder="ADMIN_REVIEW_KEY" />
@@ -1121,6 +1459,7 @@ export class AdminController {
     <a class="secondary" href="/admin/review">Proof Review</a>
     <a class="secondary" href="/admin/points">Points</a>
     <a href="/admin/menu-drafts/page">Menu Drafts</a>
+    <a class="secondary" href="/admin/shop/page">Shop</a>
   </div>
   <input id="key" placeholder="ADMIN_REVIEW_KEY" />
   <button onclick="saveKeyFromHeader()">키 저장</button>
