@@ -17,6 +17,7 @@ import { api } from "../../src/api/client";
 import { fetchRecommendQuota, watchAdQuota, RecommendQuota } from "../../src/api/points";
 import { fetchProofQuota, ProofQuota } from "../../src/api/proofQuota";
 import { API_BASE_URL } from "../../src/config";
+import { cuisineLabel, dishTypeLabel } from "../../src/labels/menuLabels";
 
 type RecommendOk = {
     ok: true;
@@ -47,43 +48,6 @@ const CUISINE_OPTIONS = [
     { label: "분식", value: "SNACK" },
     { label: "아시아", value: "ASIAN" },
 ] as const;
-
-const CUISINE_LABELS: Record<string, string> = {
-    KOREAN: "한식",
-    CHINESE: "중식",
-    JAPANESE: "일식",
-    WESTERN: "양식",
-    ASIAN: "아시아",
-    SNACK: "분식",
-    FASTFOOD: "패스트푸드",
-    SALAD: "샐러드",
-    DESSERT: "디저트",
-    ETC: "기타",
-};
-
-const DISH_TYPE_LABELS: Record<string, string> = {
-    RICE: "밥류",
-    NOODLE: "면류",
-    SOUP: "국/탕",
-    STEW: "찌개",
-    GRILL: "그릴",
-    STIR_FRY: "볶음",
-    FRIED: "튀김",
-    SALAD: "샐러드",
-    BREAD: "빵/샌드위치",
-    DESSERT: "디저트",
-    OTHER: "기타",
-};
-
-function cuisineLabel(value?: string | null) {
-    if (!value) return "아무거나";
-    return CUISINE_LABELS[value] ?? value;
-}
-
-function dishTypeLabel(value?: string | null) {
-    if (!value) return "기타";
-    return DISH_TYPE_LABELS[value] ?? value;
-}
 
 function msToKoreanRemain(ms: number) {
     if (ms <= 0) return "0분";
