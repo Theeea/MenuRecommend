@@ -32,6 +32,43 @@ type ApiRes = {
     message?: string;
 };
 
+const CUISINE_LABELS: Record<string, string> = {
+    KOREAN: "한식",
+    CHINESE: "중식",
+    JAPANESE: "일식",
+    WESTERN: "양식",
+    ASIAN: "아시아",
+    SNACK: "분식",
+    FASTFOOD: "패스트푸드",
+    SALAD: "샐러드",
+    DESSERT: "디저트",
+    ETC: "기타",
+};
+
+const DISH_TYPE_LABELS: Record<string, string> = {
+    RICE: "밥류",
+    NOODLE: "면류",
+    SOUP: "국/탕",
+    STEW: "찌개",
+    GRILL: "그릴",
+    STIR_FRY: "볶음",
+    FRIED: "튀김",
+    SALAD: "샐러드",
+    BREAD: "빵/샌드위치",
+    DESSERT: "디저트",
+    OTHER: "기타",
+};
+
+function cuisineLabel(value?: string | null) {
+    if (!value) return "";
+    return CUISINE_LABELS[value] ?? value;
+}
+
+function dishTypeLabel(value?: string | null) {
+    if (!value) return "";
+    return DISH_TYPE_LABELS[value] ?? value;
+}
+
 function fmtDate(iso: string) {
     const d = new Date(iso);
     return d.toLocaleString("ko-KR", {
@@ -150,7 +187,9 @@ export default function BlockedScreen() {
 
     const renderItem = ({ item }: { item: BlockRow }) => {
         const name = item.menu?.name ?? "(알 수 없는 메뉴)";
-        const meta = [item.menu?.cuisine, item.menu?.dishType].filter(Boolean).join(" · ");
+        const meta = [cuisineLabel(item.menu?.cuisine), dishTypeLabel(item.menu?.dishType)]
+            .filter(Boolean)
+            .join(" · ");
 
         return (
             <View
