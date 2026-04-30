@@ -48,6 +48,43 @@ const CUISINE_OPTIONS = [
     { label: "아시아", value: "ASIAN" },
 ] as const;
 
+const CUISINE_LABELS: Record<string, string> = {
+    KOREAN: "한식",
+    CHINESE: "중식",
+    JAPANESE: "일식",
+    WESTERN: "양식",
+    ASIAN: "아시아",
+    SNACK: "분식",
+    FASTFOOD: "패스트푸드",
+    SALAD: "샐러드",
+    DESSERT: "디저트",
+    ETC: "기타",
+};
+
+const DISH_TYPE_LABELS: Record<string, string> = {
+    RICE: "밥류",
+    NOODLE: "면류",
+    SOUP: "국/탕",
+    STEW: "찌개/전골",
+    GRILL: "구이",
+    STIR_FRY: "볶음",
+    FRIED: "튀김",
+    SALAD: "샐러드",
+    BREAD: "빵/샌드위치",
+    DESSERT: "디저트",
+    OTHER: "기타",
+};
+
+function cuisineLabel(value?: string | null) {
+    if (!value) return "아무거나";
+    return CUISINE_LABELS[value] ?? value;
+}
+
+function dishTypeLabel(value?: string | null) {
+    if (!value) return "기타";
+    return DISH_TYPE_LABELS[value] ?? value;
+}
+
 function msToKoreanRemain(ms: number) {
     if (ms <= 0) return "0분";
     const totalMin = Math.ceil(ms / 60000);
@@ -68,6 +105,7 @@ export default function Home() {
 
     const [rec, setRec] = useState<RecommendOk | null>(null);
     const [selectedCuisine, setSelectedCuisine] = useState<(typeof CUISINE_OPTIONS)[number]["value"]>("");
+    const selectedCuisineLabel = useMemo(() => cuisineLabel(selectedCuisine), [selectedCuisine]);
 
     // ✅ 인증 가능 여부(쿨타임/일일 제한)
     const [proofQuota, setProofQuota] = useState<ProofQuota | null>(null);
@@ -143,7 +181,10 @@ export default function Home() {
 
             await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             const msg = (data as RecommendFail)?.message ?? "추천 요청에 실패했어요.";
-            Alert.alert("추천 실패", msg);
+            Alert.alert(
+                "추천 실패",
+                selectedCuisine ? `${selectedCuisineLabel} 메뉴 중에서는 ${msg}` : msg,
+            );
         } catch (e: any) {
             await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
 
@@ -160,11 +201,14 @@ export default function Home() {
                 return;
             }
 
-            Alert.alert("추천 요청에 실패했어요", `네트워크/서버 확인 필요\n\nAPI_BASE_URL: ${API_BASE_URL}`);
+            Alert.alert(
+                "추천 요청에 실패했어요",
+                `네트워크/서버 확인 필요\n\n선택: ${selectedCuisineLabel}\nAPI_BASE_URL: ${API_BASE_URL}`,
+            );
         } finally {
             setLoading(false);
         }
-    }, [loadQuota, router, selectedCuisine]);
+    }, [loadQuota, router, selectedCuisine, selectedCuisineLabel]);
 
     const accept = useCallback(async () => {
         if (!rec) return;
@@ -428,7 +472,7 @@ export default function Home() {
                         <>
                             <Text style={{ fontSize: 22, fontWeight: "900", color: "#111" }}>{rec.menu.name}</Text>
                             <Text style={{ marginTop: 6, color: "#666", fontWeight: "700" }}>
-                                {rec.menu.cuisine} · {rec.menu.dishType ?? "기타"}
+                                {cuisineLabel(rec.menu.cuisine)} · {dishTypeLabel(rec.menu.dishType)}
                             </Text>
 
                             <View style={{ height: 12 }} />
@@ -485,26 +529,32 @@ export default function Home() {
                                 </Text>
                             ) : null}
 
-                            <View style={{ height: 10 }} />
+                            {rec.session.status !== "ACCEPTED" ? (
+                                <>
+                                    <View style={{ height: 10 }} />
 
-                            <Pressable
-                                onPress={recommend}
-                                disabled={loading}
-                                style={{
-                                    paddingVertical: 12,
-                                    borderRadius: 14,
-                                    backgroundColor: "#FFF6EE",
-                                    alignItems: "center",
-                                    borderWidth: 1,
-                                    borderColor: "#FFE0D3",
-                                }}
-                            >
-                                <Text style={{ fontWeight: "900", color: "#FF4D2D" }}>다시 추천받기</Text>
-                            </Pressable>
+                                    <Pressable
+                                        onPress={recommend}
+                                        disabled={loading}
+                                        style={{
+                                            paddingVertical: 12,
+                                            borderRadius: 14,
+                                            backgroundColor: "#FFF6EE",
+                                            alignItems: "center",
+                                            borderWidth: 1,
+                                            borderColor: "#FFE0D3",
+                                        }}
+                                    >
+                                        <Text style={{ fontWeight: "900", color: "#FF4D2D" }}>다시 추천받기</Text>
+                                    </Pressable>
+                                </>
+                            ) : null}
                         </>
                     ) : (
                         <>
-                            <Text style={{ color: "#666", fontWeight: "700" }}>버튼 한 번으로 오늘의 메뉴를 뽑아보자.</Text>
+                            <Text style={{ color: "#666", fontWeight: "700" }}>
+                                {selectedCuisine ? `${selectedCuisineLabel} 메뉴 중에서 골라볼게.` : "버튼 한 번으로 오늘의 메뉴를 뽑아보자."}
+                            </Text>
                             <View style={{ height: 12 }} />
                             <Pressable
                                 onPress={recommend}
