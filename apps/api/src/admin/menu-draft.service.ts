@@ -308,6 +308,25 @@ export class MenuDraftService {
         },
       });
 
+      await tx.auditLog.create({
+        data: {
+          actorType: 'ADMIN',
+          actorId: null,
+          action: 'MENU_DRAFT_APPROVED',
+          targetType: 'MenuDraft',
+          targetId: draft.id,
+          userId: null,
+          metadata: {
+            draftName: draft.name,
+            normalizedName: draft.normalizedName,
+            cuisine: draft.cuisine,
+            dishType: draft.dishType,
+            menuId: menu.id,
+            ingredientCount: ingredients.length,
+          },
+        },
+      });
+
       return { menu, draft: updatedDraft };
     });
 
@@ -327,17 +346,40 @@ export class MenuDraftService {
       throw new BadRequestException('APPROVED draft cannot be rejected');
     }
 
-    const updated = await this.prisma.menuDraft.update({
-      where: { id },
-      data: {
-        status: 'REJECTED',
-        reviewedAt: new Date(),
-        reviewedBy: 'admin',
-        aiMeta: {
-          ...(isRecord(draft.aiMeta) ? draft.aiMeta : {}),
-          rejectReason: String(body?.reason ?? '').trim() || null,
+    const reason = String(body?.reason ?? '').trim() || null;
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const rejected = await tx.menuDraft.update({
+        where: { id },
+        data: {
+          status: 'REJECTED',
+          reviewedAt: new Date(),
+          reviewedBy: 'admin',
+          aiMeta: {
+            ...(isRecord(draft.aiMeta) ? draft.aiMeta : {}),
+            rejectReason: reason,
+          },
         },
-      },
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorType: 'ADMIN',
+          actorId: null,
+          action: 'MENU_DRAFT_REJECTED',
+          targetType: 'MenuDraft',
+          targetId: draft.id,
+          userId: null,
+          metadata: {
+            draftName: draft.name,
+            normalizedName: draft.normalizedName,
+            cuisine: draft.cuisine,
+            dishType: draft.dishType,
+            reason,
+          },
+        },
+      });
+
+      return rejected;
     });
 
     return { ok: true, draft: updated };

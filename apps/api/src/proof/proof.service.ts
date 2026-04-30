@@ -336,6 +336,21 @@ export class ProofService {
           where: { id: u.sessionId },
           data: { status: 'DONE' as any, doneAt: new Date() },
         });
+        await this.writeAuditLog(tx, {
+          actorType: 'ADMIN',
+          action: 'PROOF_REVIEWED',
+          targetType: 'Proof',
+          targetId: u.id,
+          userId: u.session.userId,
+          metadata: {
+            result,
+            score: score ?? u.aiScore,
+            pointDelta: bonus?.earned ?? 0,
+            balanceAfter: bonus?.balanceAfter ?? null,
+            sessionId: u.sessionId,
+            model: body?.model ?? null,
+          },
+        });
         return { proof: u, bonus };
       }
 
@@ -343,6 +358,21 @@ export class ProofService {
       await tx.recommendSession.update({
         where: { id: u.sessionId },
         data: { status: 'DONE' as any, doneAt: new Date() },
+      });
+      await this.writeAuditLog(tx, {
+        actorType: 'ADMIN',
+        action: 'PROOF_REVIEWED',
+        targetType: 'Proof',
+        targetId: u.id,
+        userId: u.session.userId,
+        metadata: {
+          result,
+          score: score ?? u.aiScore,
+          pointDelta: 0,
+          balanceAfter: null,
+          sessionId: u.sessionId,
+          model: body?.model ?? null,
+        },
       });
 
       return { proof: u };
@@ -451,6 +481,24 @@ export class ProofService {
       await tx.recommendSession.update({
         where: { id: p.sessionId },
         data: { status: 'DONE' as any, doneAt: p.session.doneAt ?? new Date() },
+      });
+
+      await this.writeAuditLog(tx, {
+        actorType: 'ADMIN',
+        action: 'PROOF_REVIEW_CORRECTED',
+        targetType: 'Proof',
+        targetId: proof.id,
+        userId: proof.session.userId,
+        metadata: {
+          from,
+          to: result,
+          reason,
+          sequence,
+          pointDelta: pointAdjustment?.points ?? 0,
+          balanceAfter: pointAdjustment?.balanceAfter ?? null,
+          sessionId: proof.sessionId,
+          model: body?.model ?? null,
+        },
       });
 
       return { proof, correction, pointAdjustment };
@@ -1100,5 +1148,30 @@ export class ProofService {
     });
 
     return { ok: true, points, balanceAfter: updated.pointBalance };
+  }
+
+  private async writeAuditLog(
+    tx: any,
+    data: {
+      actorType: 'USER' | 'ADMIN' | 'SYSTEM';
+      actorId?: string | null;
+      action: string;
+      targetType: string;
+      targetId?: string | null;
+      userId?: string | null;
+      metadata?: Record<string, any> | null;
+    },
+  ) {
+    await tx.auditLog.create({
+      data: {
+        actorType: data.actorType,
+        actorId: data.actorId ?? null,
+        action: data.action,
+        targetType: data.targetType,
+        targetId: data.targetId ?? null,
+        userId: data.userId ?? null,
+        metadata: data.metadata ?? null,
+      },
+    });
   }
 }

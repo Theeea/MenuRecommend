@@ -42,6 +42,9 @@ function createPrismaMock() {
       findUnique: jest.fn(),
       create: jest.fn(),
     },
+    auditLog: {
+      create: jest.fn(),
+    },
     user: {
       findUnique: jest.fn(),
       update: jest.fn(),

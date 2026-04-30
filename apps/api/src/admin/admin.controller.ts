@@ -558,11 +558,19 @@ export class AdminController {
         <option value="SHOP_PURCHASE_SENT">교환권 발송</option>
         <option value="SHOP_PURCHASE_CANCELLED">구매 취소/환불</option>
         <option value="SHOP_PURCHASE_USED_TOGGLED">사용/미사용 변경</option>
+        <option value="PROOF_REVIEWED">인증 수동 판정</option>
+        <option value="PROOF_REVIEW_CORRECTED">인증 판정 정정</option>
+        <option value="POINTS_ADJUSTED">포인트 수동 조정</option>
+        <option value="MENU_DRAFT_APPROVED">메뉴 초안 승인</option>
+        <option value="MENU_DRAFT_REJECTED">메뉴 초안 거절</option>
       </select>
       <select id="targetType">
         <option value="ALL">전체 대상</option>
         <option value="ShopItem">상품</option>
         <option value="UserPurchase">구매</option>
+        <option value="Proof">인증</option>
+        <option value="User">유저</option>
+        <option value="MenuDraft">메뉴 초안</option>
       </select>
       <input id="userId" placeholder="userId"/>
       <select id="take"><option value="50">50건</option><option value="100">100건</option><option value="200">200건</option></select>
@@ -605,12 +613,17 @@ export class AdminController {
       SHOP_PURCHASE_REQUESTED:"구매 요청",
       SHOP_PURCHASE_SENT:"교환권 발송",
       SHOP_PURCHASE_CANCELLED:"구매 취소/환불",
-      SHOP_PURCHASE_USED_TOGGLED:"사용/미사용 변경"
+      SHOP_PURCHASE_USED_TOGGLED:"사용/미사용 변경",
+      PROOF_REVIEWED:"인증 수동 판정",
+      PROOF_REVIEW_CORRECTED:"인증 판정 정정",
+      POINTS_ADJUSTED:"포인트 수동 조정",
+      MENU_DRAFT_APPROVED:"메뉴 초안 승인",
+      MENU_DRAFT_REJECTED:"메뉴 초안 거절"
     })[v] || v || "-";
   }
   function targetPill(type){
-    const cls = type === "UserPurchase" ? "purchase" : type === "ShopItem" ? "item" : "";
-    const label = type === "UserPurchase" ? "구매" : type === "ShopItem" ? "상품" : type || "-";
+    const cls = type === "UserPurchase" ? "purchase" : type === "ShopItem" || type === "MenuDraft" ? "item" : "";
+    const label = ({ UserPurchase:"구매", ShopItem:"상품", Proof:"인증", User:"유저", MenuDraft:"메뉴 초안" })[type] || type || "-";
     return '<span class="pill '+cls+'">'+esc(label)+'</span>';
   }
   function summarize(it){
@@ -622,6 +635,11 @@ export class AdminController {
     if(it.action === "SHOP_ITEM_CREATED") return esc((m.name || "상품") + " 등록 / " + (m.pricePoints || 0) + "P");
     if(it.action === "SHOP_ITEM_UPDATED") return esc((m.name || "상품") + " 수정 / " + (m.status || "-"));
     if(it.action === "SHOP_ITEM_HIDDEN") return esc((m.name || "상품") + " 숨김");
+    if(it.action === "PROOF_REVIEWED") return esc("인증 " + (m.result || "-") + " / " + (m.pointDelta || 0) + "P");
+    if(it.action === "PROOF_REVIEW_CORRECTED") return esc("인증 " + (m.from || "-") + " -> " + (m.to || "-") + " / " + (m.pointDelta || 0) + "P / " + (m.reason || "-"));
+    if(it.action === "POINTS_ADJUSTED") return esc("포인트 " + (m.delta || 0) + "P / " + (m.note || "-"));
+    if(it.action === "MENU_DRAFT_APPROVED") return esc((m.draftName || "초안") + " 승인 / menuId " + (m.menuId || "-"));
+    if(it.action === "MENU_DRAFT_REJECTED") return esc((m.draftName || "초안") + " 거절 / " + (m.reason || "-"));
     return esc(JSON.stringify(m || {}));
   }
   function renderSummary(items){
@@ -2387,6 +2405,23 @@ export class AdminController {
           balanceAfter: updated.pointBalance,
           note: note || `admin adjust ${delta}`,
           dedupeKey: `ADMIN_ADJUST:${userId}:${Date.now()}`,
+        },
+      });
+
+      await (tx as any).auditLog.create({
+        data: {
+          actorType: 'ADMIN',
+          actorId: null,
+          action: 'POINTS_ADJUSTED',
+          targetType: 'User',
+          targetId: userId,
+          userId,
+          metadata: {
+            delta,
+            note: note || `admin adjust ${delta}`,
+            balanceBefore: user.pointBalance ?? 0,
+            balanceAfter: updated.pointBalance,
+          },
         },
       });
 

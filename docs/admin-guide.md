@@ -140,6 +140,35 @@ MVP 정책:
 - 이미 `SENT` 또는 `CANCELLED`인 요청은 취소/환불하지 않습니다.
 - 유저가 교환권을 `사용/미사용`으로 표시해도 구매 상태는 `SENT`로 유지됩니다.
 
+## 감사로그
+
+화면:
+
+```text
+GET /admin/audit/page
+```
+
+API:
+
+```text
+GET /admin/audit-logs
+```
+
+현재 기록하는 액션:
+
+- `SHOP_ITEM_CREATED`: 포인트 상품 등록
+- `SHOP_ITEM_UPDATED`: 포인트 상품 수정
+- `SHOP_ITEM_HIDDEN`: 포인트 상품 숨김
+- `SHOP_PURCHASE_REQUESTED`: 유저 구매 요청
+- `SHOP_PURCHASE_SENT`: 어드민 모바일교환권 발송
+- `SHOP_PURCHASE_CANCELLED`: 유저/어드민 구매 취소 및 환불
+- `SHOP_PURCHASE_USED_TOGGLED`: 유저 사용/미사용 표시 변경
+- `PROOF_REVIEWED`: 어드민 인증 PASS/FAIL 수동 판정
+- `PROOF_REVIEW_CORRECTED`: 어드민 인증 판정 정정
+- `POINTS_ADJUSTED`: 어드민 포인트 수동 조정
+- `MENU_DRAFT_APPROVED`: AI 메뉴 초안 승인
+- `MENU_DRAFT_REJECTED`: AI 메뉴 초안 거절
+
 ## Template string 주의
 
 어드민 HTML은 TypeScript template string 안에 들어갑니다.
