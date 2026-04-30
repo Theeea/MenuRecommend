@@ -1,4 +1,14 @@
 export declare const CUISINE_LABELS: Record<string, string>;
+export declare const CUISINE_VALUES: readonly string[];
+export declare const CUISINE_OPTIONS: readonly Readonly<{
+  value: string;
+  label: string;
+}>[];
+export declare const RECOMMEND_CUISINE_VALUES: readonly string[];
+export declare const RECOMMEND_CUISINE_OPTIONS: readonly Readonly<{
+  value: string;
+  label: string;
+}>[];
 export declare const DISH_TYPE_LABELS: Record<string, string>;
 export declare const PROOF_RESULT_LABELS: Record<string, string>;
 export declare const MENU_DRAFT_STATUS_LABELS: Record<string, string>;

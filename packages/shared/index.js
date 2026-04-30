@@ -11,6 +11,28 @@ const CUISINE_LABELS = {
   ETC: "기타",
 };
 
+const CUISINE_VALUES = Object.freeze([
+  "KOREAN",
+  "CHINESE",
+  "JAPANESE",
+  "WESTERN",
+  "ASIAN",
+  "SNACK",
+  "FASTFOOD",
+  "SALAD",
+  "DESSERT",
+  "ETC",
+]);
+
+const RECOMMEND_CUISINE_VALUES = Object.freeze([
+  "KOREAN",
+  "JAPANESE",
+  "CHINESE",
+  "WESTERN",
+  "SNACK",
+  "ASIAN",
+]);
+
 const DISH_TYPE_LABELS = {
   RICE: "밥류",
   NOODLE: "면류",
@@ -112,8 +134,32 @@ function removableLabel(value, fallback = "") {
   return labelFrom(REMOVABLE_LABELS, value, fallback);
 }
 
+function optionsFromLabels(labels, values, prefix = []) {
+  return [
+    ...prefix,
+    ...values.map((value) => ({
+      value,
+      label: labelFrom(labels, value, value),
+    })),
+  ];
+}
+
+const CUISINE_OPTIONS = Object.freeze(
+  optionsFromLabels(CUISINE_LABELS, CUISINE_VALUES),
+);
+
+const RECOMMEND_CUISINE_OPTIONS = Object.freeze(
+  optionsFromLabels(CUISINE_LABELS, RECOMMEND_CUISINE_VALUES, [
+    { label: "아무거나", value: "" },
+  ]),
+);
+
 module.exports = {
   CUISINE_LABELS,
+  CUISINE_VALUES,
+  CUISINE_OPTIONS,
+  RECOMMEND_CUISINE_VALUES,
+  RECOMMEND_CUISINE_OPTIONS,
   DISH_TYPE_LABELS,
   PROOF_RESULT_LABELS,
   MENU_DRAFT_STATUS_LABELS,

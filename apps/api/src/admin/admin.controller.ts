@@ -128,6 +128,43 @@ function buildProofStats(items: any[]) {
   return stats;
 }
 
+function escapeOptionValue(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function escapeOptionLabel(value: string) {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function renderSelectOptions(
+  labels: Record<string, string>,
+  options: {
+    selected?: string;
+    prefix?: Array<{ value: string; label: string }>;
+    suffix?: Array<{ value: string; label: string }>;
+  } = {},
+) {
+  const entries = [
+    ...(options.prefix ?? []),
+    ...Object.entries(labels).map(([value, label]) => ({ value, label })),
+    ...(options.suffix ?? []),
+  ];
+
+  return entries
+    .map(({ value, label }) => {
+      const selected = value === options.selected ? ' selected' : '';
+      return `<option value="${escapeOptionValue(value)}"${selected}>${escapeOptionLabel(label)}</option>`;
+    })
+    .join('\n');
+}
+
 @Controller('admin')
 export class AdminController {
   constructor(
@@ -1015,17 +1052,9 @@ export class AdminController {
       <strong>AI 메뉴 후보 생성</strong>
       <label class="muted">Cuisine</label>
       <select id="genCuisine">
-        <option value="">전체</option>
-        <option value="KOREAN">한식</option>
-        <option value="CHINESE">중식</option>
-        <option value="JAPANESE">일식</option>
-        <option value="WESTERN">양식</option>
-        <option value="ASIAN">아시아</option>
-        <option value="SNACK">분식</option>
-        <option value="FASTFOOD">패스트푸드</option>
-        <option value="SALAD">샐러드</option>
-        <option value="DESSERT">디저트</option>
-        <option value="ETC">기타</option>
+        ${renderSelectOptions(CUISINE_LABELS, {
+          prefix: [{ value: '', label: '전체' }],
+        })}
       </select>
       <label class="muted">개수</label>
       <input id="genCount" type="number" min="1" max="30" value="10" style="width:90px"/>
@@ -1044,24 +1073,16 @@ export class AdminController {
       <strong>초안 목록</strong>
       <label class="muted">Status</label>
       <select id="statusFilter">
-        <option value="PENDING" selected>PENDING</option>
-        <option value="APPROVED">APPROVED</option>
-        <option value="REJECTED">REJECTED</option>
-        <option value="ALL">ALL</option>
+        ${renderSelectOptions(MENU_DRAFT_STATUS_LABELS, {
+          selected: 'PENDING',
+          suffix: [{ value: 'ALL', label: '전체' }],
+        })}
       </select>
       <label class="muted">Cuisine</label>
       <select id="cuisineFilter">
-        <option value="">전체</option>
-        <option value="KOREAN">한식</option>
-        <option value="CHINESE">중식</option>
-        <option value="JAPANESE">일식</option>
-        <option value="WESTERN">양식</option>
-        <option value="ASIAN">아시아</option>
-        <option value="SNACK">분식</option>
-        <option value="FASTFOOD">패스트푸드</option>
-        <option value="SALAD">샐러드</option>
-        <option value="DESSERT">디저트</option>
-        <option value="ETC">기타</option>
+        ${renderSelectOptions(CUISINE_LABELS, {
+          prefix: [{ value: '', label: '전체' }],
+        })}
       </select>
       <label class="muted">Take</label>
       <select id="take">

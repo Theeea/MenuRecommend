@@ -17,7 +17,7 @@ import { api } from "../../src/api/client";
 import { fetchRecommendQuota, watchAdQuota, RecommendQuota } from "../../src/api/points";
 import { fetchProofQuota, ProofQuota } from "../../src/api/proofQuota";
 import { API_BASE_URL } from "../../src/config";
-import { cuisineLabel, dishTypeLabel } from "@menu-reward/shared";
+import { RECOMMEND_CUISINE_OPTIONS, cuisineLabel, dishTypeLabel } from "@menu-reward/shared";
 
 type RecommendOk = {
     ok: true;
@@ -39,16 +39,6 @@ type RecommendOk = {
 
 type RecommendFail = { ok: false; message: string };
 
-const CUISINE_OPTIONS = [
-    { label: "아무거나", value: "" },
-    { label: "한식", value: "KOREAN" },
-    { label: "일식", value: "JAPANESE" },
-    { label: "중식", value: "CHINESE" },
-    { label: "양식", value: "WESTERN" },
-    { label: "분식", value: "SNACK" },
-    { label: "아시아", value: "ASIAN" },
-] as const;
-
 function msToKoreanRemain(ms: number) {
     if (ms <= 0) return "0분";
     const totalMin = Math.ceil(ms / 60000);
@@ -68,7 +58,7 @@ export default function Home() {
     const [refreshing, setRefreshing] = useState(false);
 
     const [rec, setRec] = useState<RecommendOk | null>(null);
-    const [selectedCuisine, setSelectedCuisine] = useState<(typeof CUISINE_OPTIONS)[number]["value"]>("");
+    const [selectedCuisine, setSelectedCuisine] = useState("");
     const selectedCuisineLabel = useMemo(() => cuisineLabel(selectedCuisine), [selectedCuisine]);
 
     // ✅ 인증 가능 여부(쿨타임/일일 제한)
@@ -403,7 +393,7 @@ export default function Home() {
                     <Text style={{ color: "#555", fontWeight: "800" }}>먹고 싶은 종류</Text>
                     <View style={{ height: 8 }} />
                     <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                        {CUISINE_OPTIONS.map((option) => {
+                        {RECOMMEND_CUISINE_OPTIONS.map((option) => {
                             const active = selectedCuisine === option.value;
                             return (
                                 <Pressable
