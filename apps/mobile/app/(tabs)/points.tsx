@@ -86,6 +86,8 @@ type PurchaseItem = {
         code?: string | null;
         cancelReason?: string | null;
         cancelledBy?: string | null;
+        usedByUser?: boolean | null;
+        usedByUserAt?: string | null;
     } | null;
     shopItem?: {
         id: string;
@@ -360,9 +362,11 @@ export default function PointsScreen() {
     const [cancelTarget, setCancelTarget] = useState<PurchaseItem | null>(null);
     const [cancelReason, setCancelReason] = useState("");
     const [voucherTarget, setVoucherTarget] = useState<PurchaseItem | null>(null);
+    const [purchaseHistoryOpen, setPurchaseHistoryOpen] = useState(false);
 
     const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
+    const [purchaseRefreshing, setPurchaseRefreshing] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -444,16 +448,17 @@ export default function PointsScreen() {
     };
 
     const loadShop = async () => {
-        try {
-            const [itemsRes, purchasesRes] = await Promise.all([
-                apiFetch<any>("/shop/items", tokenRaw),
-                apiFetch<any>("/me/purchases?take=5", tokenRaw),
-            ]);
-            setShopItems(itemsRes.data?.items ?? itemsRes.data?.data?.items ?? []);
-            setPurchases(purchasesRes.data?.items ?? purchasesRes.data?.data?.items ?? []);
-        } catch {
-            setShopItems([]);
-            setPurchases([]);
+        const [itemsRes, purchasesRes] = await Promise.allSettled([
+            apiFetch<any>("/shop/items", tokenRaw),
+            apiFetch<any>("/me/purchases?take=30", tokenRaw),
+        ]);
+
+        if (itemsRes.status === "fulfilled") {
+            setShopItems(itemsRes.value.data?.items ?? itemsRes.value.data?.data?.items ?? []);
+        }
+
+        if (purchasesRes.status === "fulfilled") {
+            setPurchases(purchasesRes.value.data?.items ?? purchasesRes.value.data?.data?.items ?? []);
         }
     };
 
@@ -577,6 +582,61 @@ export default function PointsScreen() {
             await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             Alert.alert("취소 실패", "이미 발송되었거나 상태가 변경된 요청일 수 있어요.");
         }
+    };
+
+    const setPurchaseUsed = async (purchase: PurchaseItem, used: boolean) => {
+        try {
+            await apiFetch<any>(`/me/purchases/${purchase.id}/used`, tokenRaw, {
+                method: "POST",
+                body: JSON.stringify({ used }),
+            });
+            await Haptics.selectionAsync();
+            setVoucherTarget((prev) =>
+                prev?.id === purchase.id
+                    ? {
+                        ...prev,
+                        fulfillmentMeta: {
+                            ...(prev.fulfillmentMeta ?? {}),
+                            usedByUser: used,
+                            usedByUserAt: used ? new Date().toISOString() : null,
+                        },
+                    }
+                    : prev
+            );
+            setPurchases((prev) =>
+                prev.map((x) =>
+                    x.id === purchase.id
+                        ? {
+                            ...x,
+                            fulfillmentMeta: {
+                                ...(x.fulfillmentMeta ?? {}),
+                                usedByUser: used,
+                                usedByUserAt: used ? new Date().toISOString() : null,
+                            },
+                        }
+                        : x
+                )
+            );
+        } catch (e: any) {
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            Alert.alert("처리 실패", "교환권 상태를 변경하지 못했어요.");
+        }
+    };
+
+    const refreshPurchaseHistory = async () => {
+        if (purchaseRefreshing) return;
+        await Haptics.selectionAsync();
+        setPurchaseRefreshing(true);
+        try {
+            await loadShop();
+        } finally {
+            setPurchaseRefreshing(false);
+        }
+    };
+
+    const openVoucher = async (purchase: PurchaseItem) => {
+        await Haptics.selectionAsync();
+        setVoucherTarget(purchase);
     };
 
     const timeline: TimelineItem[] = useMemo(() => {
@@ -752,6 +812,69 @@ export default function PointsScreen() {
         );
     };
 
+    const renderPurchaseCard = (p: PurchaseItem) => {
+        const name = p.shopItem?.name ?? p.itemSnapshot?.name ?? "상품";
+        const status = p.status === "SENT" ? "발송 완료" : p.status === "CANCELLED" ? "취소됨" : "발송 대기";
+        const cancelReason = p.fulfillmentMeta?.cancelReason;
+        const hasVoucherCode = p.status === "SENT" && !!p.fulfillmentMeta?.code;
+        const usedByUser = p.fulfillmentMeta?.usedByUser === true;
+
+        return (
+            <View
+                key={p.id}
+                style={{
+                    backgroundColor: CARD_BG,
+                    borderRadius: 18,
+                    padding: 14,
+                    borderWidth: 1,
+                    borderColor: "#F1E8E0",
+                    marginBottom: 10,
+                }}
+            >
+                <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
+                    <Text numberOfLines={1} style={{ flex: 1, fontWeight: "800", color: "#111827" }}>
+                        {name}
+                    </Text>
+                    <Text style={{ fontSize: 12, color: "#6B7280" }}>{fmtShortDate(p.createdAt)}</Text>
+                </View>
+                <Text style={{ marginTop: 4, fontSize: 12, color: "#6B7280" }}>
+                    {status} · -{fmtNumber(p.points)}P
+                </Text>
+                {p.status === "SENT" && (
+                    <Text style={{ marginTop: 4, fontSize: 12, color: usedByUser ? "#166534" : "#6B7280", fontWeight: "800" }}>
+                        {usedByUser ? "사용" : "미사용"}
+                    </Text>
+                )}
+                {!!cancelReason && (
+                    <Text style={{ marginTop: 4, fontSize: 12, color: "#B42318", fontWeight: "700" }}>
+                        취소 사유: {cancelReason}
+                    </Text>
+                )}
+                <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                    {p.status === "REQUESTED" && (
+                        <Pressable
+                            onPress={() => {
+                                setCancelTarget(p);
+                                setCancelReason("");
+                            }}
+                            style={{ paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: "#FEE4E2" }}
+                        >
+                            <Text style={{ color: "#B42318", fontWeight: "900", fontSize: 12 }}>취소</Text>
+                        </Pressable>
+                    )}
+                    {hasVoucherCode && (
+                        <Pressable
+                            onPress={() => openVoucher(p)}
+                            style={{ paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: "#111827" }}
+                        >
+                            <Text style={{ color: "#fff", fontWeight: "900", fontSize: 12 }}>교환권 보기</Text>
+                        </Pressable>
+                    )}
+                </View>
+            </View>
+        );
+    };
+
     if (!API_BASE) {
         return (
             <View style={{ flex: 1, paddingTop: insets.top + 24, padding: 16 }}>
@@ -865,7 +988,136 @@ export default function PointsScreen() {
             </Modal>
 
             <Modal
-                visible={!!voucherTarget}
+                visible={purchaseHistoryOpen}
+                transparent
+                animationType="slide"
+                onRequestClose={() => setPurchaseHistoryOpen(false)}
+            >
+                <View style={{ flex: 1, justifyContent: "flex-end" }}>
+                    <Pressable
+                        onPress={() => setPurchaseHistoryOpen(false)}
+                        style={{
+                            position: "absolute",
+                            top: 0,
+                            right: 0,
+                            bottom: 0,
+                            left: 0,
+                            backgroundColor: "rgba(0,0,0,0.35)",
+                        }}
+                    />
+                    <View
+                        style={{
+                            maxHeight: "82%",
+                            backgroundColor: SCREEN_BG,
+                            borderTopLeftRadius: 22,
+                            borderTopRightRadius: 22,
+                            paddingTop: 14,
+                            paddingHorizontal: 16,
+                            paddingBottom: insets.bottom + 14,
+                        }}
+                    >
+                        <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 18, fontWeight: "900", color: "#111827" }}>구매내역</Text>
+                                <Text style={{ marginTop: 4, color: "#6B7280", fontWeight: "700" }}>
+                                    발송 대기, 취소, 교환권 상태를 확인할 수 있어요.
+                                </Text>
+                            </View>
+                        </View>
+
+                        <ScrollView
+                            showsVerticalScrollIndicator={false}
+                            contentContainerStyle={{ paddingTop: 12, paddingBottom: 8 }}
+                            refreshControl={<RefreshControl refreshing={purchaseRefreshing} onRefresh={refreshPurchaseHistory} />}
+                        >
+                            {purchases.length ? (
+                                purchases.map(renderPurchaseCard)
+                            ) : (
+                                <View style={{ paddingVertical: 34, alignItems: "center" }}>
+                                    <Text style={{ color: "#6B7280", fontWeight: "700" }}>구매내역이 없어요.</Text>
+                                </View>
+                            )}
+                        </ScrollView>
+                    </View>
+                    {!!voucherTarget && (
+                        <View
+                            style={{
+                                position: "absolute",
+                                top: 0,
+                                right: 0,
+                                bottom: 0,
+                                left: 0,
+                                zIndex: 20,
+                                backgroundColor: "rgba(0,0,0,0.55)",
+                                justifyContent: "center",
+                                padding: 18,
+                            }}
+                        >
+                            <Pressable
+                                onPress={() => setVoucherTarget(null)}
+                                style={{ position: "absolute", top: 0, right: 0, bottom: 0, left: 0 }}
+                            />
+                            <View style={{ backgroundColor: "#fff", borderRadius: 18, padding: 16 }}>
+                                <Text style={{ fontSize: 17, fontWeight: "900", color: "#111827" }}>모바일교환권</Text>
+                                <Text style={{ marginTop: 8, color: "#6B7280", fontWeight: "700" }}>
+                                    {voucherTarget.shopItem?.name ?? voucherTarget.itemSnapshot?.name ?? "상품"}
+                                </Text>
+                                <View
+                                    style={{
+                                        marginTop: 14,
+                                        borderRadius: 16,
+                                        backgroundColor: "#F9FAFB",
+                                        borderWidth: 1,
+                                        borderColor: "#E5E7EB",
+                                        padding: 18,
+                                        alignItems: "center",
+                                    }}
+                                >
+                                    <Ionicons name="qr-code-outline" size={74} color="#111827" />
+                                    <Text selectable style={{ marginTop: 12, fontSize: 22, fontWeight: "900", color: "#111827", textAlign: "center" }}>
+                                        {voucherTarget.fulfillmentMeta?.code || "코드 확인 필요"}
+                                    </Text>
+                                    {!!voucherTarget.fulfillmentMeta?.memo && (
+                                        <Text style={{ marginTop: 8, color: "#6B7280", textAlign: "center" }}>
+                                            {voucherTarget.fulfillmentMeta.memo}
+                                        </Text>
+                                    )}
+                                </View>
+                                {voucherTarget.status === "SENT" && (
+                                    <Pressable
+                                        onPress={() => setPurchaseUsed(voucherTarget, voucherTarget.fulfillmentMeta?.usedByUser !== true)}
+                                        style={{
+                                            marginTop: 12,
+                                            paddingVertical: 12,
+                                            borderRadius: 12,
+                                            backgroundColor: voucherTarget.fulfillmentMeta?.usedByUser === true ? "#F3F4F6" : "#DCFCE7",
+                                            alignItems: "center",
+                                        }}
+                                    >
+                                        <Text
+                                            style={{
+                                                color: voucherTarget.fulfillmentMeta?.usedByUser === true ? "#111827" : "#166534",
+                                                fontWeight: "900",
+                                            }}
+                                        >
+                                            {voucherTarget.fulfillmentMeta?.usedByUser === true ? "미사용으로 되돌리기" : "사용 처리"}
+                                        </Text>
+                                    </Pressable>
+                                )}
+                                <Pressable
+                                    onPress={() => setVoucherTarget(null)}
+                                    style={{ marginTop: 12, paddingVertical: 12, borderRadius: 12, backgroundColor: "#111827", alignItems: "center" }}
+                                >
+                                    <Text style={{ color: "#fff", fontWeight: "900" }}>닫기</Text>
+                                </Pressable>
+                            </View>
+                        </View>
+                    )}
+                </View>
+            </Modal>
+
+            <Modal
+                visible={!!voucherTarget && !purchaseHistoryOpen}
                 transparent
                 animationType="fade"
                 onRequestClose={() => setVoucherTarget(null)}
@@ -897,6 +1149,27 @@ export default function PointsScreen() {
                                 </Text>
                             )}
                         </View>
+                        {!!voucherTarget && voucherTarget.status === "SENT" && (
+                            <Pressable
+                                onPress={() => setPurchaseUsed(voucherTarget, voucherTarget.fulfillmentMeta?.usedByUser !== true)}
+                                style={{
+                                    marginTop: 12,
+                                    paddingVertical: 12,
+                                    borderRadius: 12,
+                                    backgroundColor: voucherTarget.fulfillmentMeta?.usedByUser === true ? "#F3F4F6" : "#DCFCE7",
+                                    alignItems: "center",
+                                }}
+                            >
+                                <Text
+                                    style={{
+                                        color: voucherTarget.fulfillmentMeta?.usedByUser === true ? "#111827" : "#166534",
+                                        fontWeight: "900",
+                                    }}
+                                >
+                                    {voucherTarget.fulfillmentMeta?.usedByUser === true ? "미사용으로 되돌리기" : "사용 처리"}
+                                </Text>
+                            </Pressable>
+                        )}
                         <Pressable
                             onPress={() => setVoucherTarget(null)}
                             style={{ marginTop: 12, paddingVertical: 12, borderRadius: 12, backgroundColor: "#111827", alignItems: "center" }}
@@ -1035,6 +1308,34 @@ export default function PointsScreen() {
 
                         <View style={{ height: 12 }} />
 
+                        <Pressable
+                            onPress={async () => {
+                                await Haptics.selectionAsync();
+                                setPurchaseHistoryOpen(true);
+                            }}
+                            style={{
+                                marginBottom: 12,
+                                paddingVertical: 12,
+                                paddingHorizontal: 14,
+                                borderRadius: 14,
+                                backgroundColor: CARD_BG,
+                                borderWidth: 1,
+                                borderColor: "#F1E8E0",
+                                flexDirection: "row",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                gap: 10,
+                            }}
+                        >
+                            <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                                <Ionicons name="receipt-outline" size={18} color="#111827" />
+                                <Text style={{ color: "#111827", fontWeight: "900" }}>구매내역 보기</Text>
+                            </View>
+                            <Text style={{ color: "#6B7280", fontWeight: "800", fontSize: 12 }}>
+                                {purchases.length ? `${purchases.length}건` : "없음"}
+                            </Text>
+                        </Pressable>
+
                         {shopItems.length ? (
                             shopItems.map((item) => {
                                 const canBuy = balance >= item.pricePoints && item.stock !== 0;
@@ -1109,59 +1410,6 @@ export default function PointsScreen() {
                         ) : (
                             <View style={{ paddingVertical: 34, alignItems: "center" }}>
                                 <Text style={{ color: "#6B7280", fontWeight: "700" }}>구매 가능한 상품이 아직 없어요.</Text>
-                            </View>
-                        )}
-
-                        {!!purchases.length && (
-                            <View style={{ marginTop: 4, backgroundColor: CARD_BG, borderRadius: 18, padding: 14, borderWidth: 1, borderColor: "#F1E8E0" }}>
-                                <Text style={{ fontSize: 14, fontWeight: "900", color: "#111827" }}>최근 구매 요청</Text>
-                                <View style={{ height: 8 }} />
-                                {purchases.map((p) => {
-                                    const name = p.shopItem?.name ?? p.itemSnapshot?.name ?? "상품";
-                                    const status =
-                                        p.status === "SENT" ? "발송 완료" : p.status === "CANCELLED" ? "취소됨" : "발송 대기";
-                                    const cancelReason = p.fulfillmentMeta?.cancelReason;
-                                    const hasVoucherCode = p.status === "SENT" && !!p.fulfillmentMeta?.code;
-                                    return (
-                                        <View key={p.id} style={{ paddingVertical: 8, borderTopWidth: 1, borderColor: "#F3F4F6" }}>
-                                            <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
-                                                <Text numberOfLines={1} style={{ flex: 1, fontWeight: "800", color: "#111827" }}>
-                                                    {name}
-                                                </Text>
-                                                <Text style={{ fontSize: 12, color: "#6B7280" }}>{fmtShortDate(p.createdAt)}</Text>
-                                            </View>
-                                            <Text style={{ marginTop: 4, fontSize: 12, color: "#6B7280" }}>
-                                                {status} · -{fmtNumber(p.points)}P
-                                            </Text>
-                                            {!!cancelReason && (
-                                                <Text style={{ marginTop: 4, fontSize: 12, color: "#B42318", fontWeight: "700" }}>
-                                                    취소 사유: {cancelReason}
-                                                </Text>
-                                            )}
-                                            <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
-                                                {p.status === "REQUESTED" && (
-                                                    <Pressable
-                                                        onPress={() => {
-                                                            setCancelTarget(p);
-                                                            setCancelReason("");
-                                                        }}
-                                                        style={{ paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: "#FEE4E2" }}
-                                                    >
-                                                        <Text style={{ color: "#B42318", fontWeight: "900", fontSize: 12 }}>취소</Text>
-                                                    </Pressable>
-                                                )}
-                                                {hasVoucherCode && (
-                                                    <Pressable
-                                                        onPress={() => setVoucherTarget(p)}
-                                                        style={{ paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: "#111827" }}
-                                                    >
-                                                        <Text style={{ color: "#fff", fontWeight: "900", fontSize: 12 }}>교환권 보기</Text>
-                                                    </Pressable>
-                                                )}
-                                            </View>
-                                        </View>
-                                    );
-                                })}
                             </View>
                         )}
                     </ScrollView>

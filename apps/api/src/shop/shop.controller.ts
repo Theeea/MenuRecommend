@@ -48,4 +48,17 @@ export class ShopController {
       body?.reason ?? '',
     );
   }
+
+  @Post('me/purchases/:id/used')
+  setUsed(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { used?: boolean },
+  ) {
+    return this.shop.setPurchaseUsedByUser(
+      req.user.userId,
+      id,
+      body?.used === true,
+    );
+  }
 }

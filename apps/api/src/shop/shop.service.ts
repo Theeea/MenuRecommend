@@ -302,6 +302,57 @@ export class ShopService {
     return this.cancelPurchase(purchaseId, reason, 'user', userId);
   }
 
+  async setPurchaseUsedByUser(
+    userId: string,
+    purchaseId: string,
+    used: boolean,
+  ) {
+    const normalizedId = String(purchaseId ?? '').trim();
+    if (!normalizedId) throw new BadRequestException('purchaseId is required');
+
+    try {
+      return await this.prisma.$transaction(async (tx: any) => {
+        const purchase = await tx.userPurchase.findUnique({
+          where: { id: normalizedId },
+        });
+        if (!purchase || purchase.userId !== userId) {
+          throw new NotFoundException('purchase not found');
+        }
+        if (purchase.status !== 'SENT') {
+          throw new ConflictException({
+            code: 'SHOP_PURCHASE_NOT_SENT',
+            message: '발송 완료된 구매만 사용 처리할 수 있습니다.',
+          });
+        }
+
+        const updated = await tx.userPurchase.update({
+          where: { id: normalizedId },
+          data: {
+            fulfillmentMeta: {
+              ...(purchase.fulfillmentMeta &&
+              typeof purchase.fulfillmentMeta === 'object'
+                ? purchase.fulfillmentMeta
+                : {}),
+              usedByUser: used,
+              usedByUserAt: used ? new Date().toISOString() : null,
+            },
+          },
+          include: { shopItem: true },
+        });
+
+        return { ok: true, purchase: updated };
+      });
+    } catch (e: any) {
+      if (isMissingShopTableError(e)) {
+        throw new ServiceUnavailableException({
+          code: 'SHOP_MIGRATION_REQUIRED',
+          message: '포인트 사용 DB migration이 필요합니다.',
+        });
+      }
+      throw e;
+    }
+  }
+
   async cancelPurchaseByAdmin(purchaseId: string, reason: string) {
     return this.cancelPurchase(purchaseId, reason, 'admin');
   }
