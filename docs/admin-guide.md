@@ -154,6 +154,12 @@ API:
 GET /admin/audit-logs
 ```
 
+화면 정책:
+
+- 상단 필터로 액션, 대상 타입, 유저 ID, 조회 건수를 바꿀 수 있습니다.
+- 결과는 표 형태로 보고, 행을 누르면 상세 JSON이 펼쳐집니다.
+- 상단 요약은 조회 로그 수와 주요 Shop 액션 수를 보여줍니다.
+
 현재 기록하는 액션:
 
 - `SHOP_ITEM_CREATED`: 포인트 상품 등록
@@ -168,6 +174,11 @@ GET /admin/audit-logs
 - `POINTS_ADJUSTED`: 어드민 포인트 수동 조정
 - `MENU_DRAFT_APPROVED`: AI 메뉴 초안 승인
 - `MENU_DRAFT_REJECTED`: AI 메뉴 초안 거절
+
+운영 원칙:
+
+- 포인트, 인증, 구매, 메뉴 초안 같은 관리자 액션은 가능한 한 같은 트랜잭션 안에서 `AuditLog`를 남깁니다.
+- 감사로그는 상태 변경의 부가 정보가 아니라 운영 추적의 기준으로 봅니다.
 
 ## Template string 주의
 

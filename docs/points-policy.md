@@ -60,6 +60,26 @@ PROOF:PASS:<proofId>
 - 네트워크 재시도
 - 같은 Proof에 대해 worker와 admin review가 모두 호출되는 경우
 
+## 감사로그
+
+포인트와 직접 연결되는 운영 액션은 감사로그를 남깁니다.
+
+기록 대상:
+
+- `PROOF_REVIEWED`
+- `PROOF_REVIEW_CORRECTED`
+- `POINTS_ADJUSTED`
+- `SHOP_PURCHASE_REQUESTED`
+- `SHOP_PURCHASE_SENT`
+- `SHOP_PURCHASE_CANCELLED`
+- `SHOP_PURCHASE_USED_TOGGLED`
+
+원칙:
+
+- 포인트 잔액 변경과 감사로그 기록은 가능한 한 같은 트랜잭션 안에서 처리합니다.
+- 감사로그는 포인트 ledger를 대체하지 않습니다.
+- ledger는 잔액 변동의 원장이고, audit log는 운영 추적용입니다.
+
 ## 모바일 표시 정책
 
 포인트 탭은 Proof와 Ledger를 합쳐 타임라인으로 보여줍니다.

@@ -278,6 +278,41 @@
 
 - 포인트 관리 또는 조회 화면입니다.
 
+### `GET /admin/audit/page`
+
+역할:
+
+- 감사로그를 HTML로 렌더링합니다.
+- 상단 필터로 액션, 대상 타입, 유저 ID, 조회 건수를 바꿀 수 있습니다.
+
+### `GET /admin/audit-logs`
+
+역할:
+
+- 감사로그 목록을 JSON으로 반환합니다.
+
+쿼리:
+
+- `action`: `ALL` 또는 액션명
+- `targetType`: `ALL` 또는 `ShopItem`, `UserPurchase`, `Proof`, `User`, `MenuDraft`
+- `userId`: 유저 ID 검색
+- `take`: 조회 개수
+
+주요 액션:
+
+- `SHOP_ITEM_CREATED`
+- `SHOP_ITEM_UPDATED`
+- `SHOP_ITEM_HIDDEN`
+- `SHOP_PURCHASE_REQUESTED`
+- `SHOP_PURCHASE_SENT`
+- `SHOP_PURCHASE_CANCELLED`
+- `SHOP_PURCHASE_USED_TOGGLED`
+- `PROOF_REVIEWED`
+- `PROOF_REVIEW_CORRECTED`
+- `POINTS_ADJUSTED`
+- `MENU_DRAFT_APPROVED`
+- `MENU_DRAFT_REJECTED`
+
 ## Shop
 
 ### `GET /shop/items`
@@ -327,6 +362,7 @@
 - 어드민 구매 목록은 `GET /admin/shop/purchases?status=REQUESTED|SENT|CANCELLED|ALL&take=50&q=검색어`를 사용합니다.
 - 어드민 발송 완료는 `POST /admin/shop/purchases/:id/sent`를 사용합니다.
 - 어드민 취소/환불은 `POST /admin/shop/purchases/:id/cancel`을 사용합니다.
+- 어드민/Proof/메뉴 초안/포인트 수동 조정 액션은 `AuditLog`에 기록합니다.
 
 발송/취소 경쟁 조건:
 
