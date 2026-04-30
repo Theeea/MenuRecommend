@@ -24,10 +24,12 @@ export class ProofController {
   @UseGuards(AuthGuard('jwt'))
   @Post()
   createQueued(@Req() req: any, @Body() body: CreateProofDto) {
-    if (!body?.sessionId) throw new BadRequestException('sessionId is required');
+    if (!body?.sessionId)
+      throw new BadRequestException('sessionId is required');
     if (!body?.imageUrl) throw new BadRequestException('imageUrl is required');
     if (!body?.rawUrl) throw new BadRequestException('rawUrl is required');
-    if (!body?.challengeCode) throw new BadRequestException('challengeCode is required');
+    if (!body?.challengeCode)
+      throw new BadRequestException('challengeCode is required');
 
     return this.service.createQueued(
       req.user.userId,
@@ -55,5 +57,26 @@ export class ProofController {
     @ReqHeaders('x-admin-key') adminKey?: string,
   ) {
     return this.service.reviewByAdminKey(adminKey, proofId, body);
+  }
+
+  /**
+   * 관리자 최종 판정 정정.
+   * PASS -> FAIL이면 포인트 회수, FAIL -> PASS이면 포인트 재지급.
+   * 헤더: x-admin-key
+   */
+  @Post(':id/correct-review')
+  correctReview(
+    @Param('id') proofId: string,
+    @Body()
+    body: {
+      result: 'PASS' | 'FAIL';
+      reason?: string;
+      score?: number;
+      model?: string;
+      meta?: any;
+    },
+    @ReqHeaders('x-admin-key') adminKey?: string,
+  ) {
+    return this.service.correctReviewByAdminKey(adminKey, proofId, body);
   }
 }

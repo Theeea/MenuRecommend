@@ -88,11 +88,36 @@ pnpm --filter api proof:ai
 
 ## 결과 기준
 
-권장 기준:
+현재 AI 판정 기준:
 
-- match true, confidence 충분함: `PASS`
-- match false, confidence 충분함: `FAIL`
-- 불확실함: `HOLD`
+- `match=true`
+- `realPhotoLikely=false`가 아니어야 함
+- `screenOrPrintSuspicion=true`가 아니어야 함
+- `stockOrWebImageSuspicion=true`가 아니어야 함
+- `confidence >= PROOF_PASS_CONFIDENCE`
+  - 기본값: `0.92`
+  - 허용 범위: `0.75` ~ `0.99`
+- 위 조건을 모두 만족하면 `PASS`
+
+거절 기준:
+
+- `match=false`
+- `confidence >= 0.80`
+- 위 조건을 만족하면 `FAIL`
+
+수동 검토 기준:
+
+- 메뉴는 맞아 보이지만 confidence가 낮음
+- 실제 촬영 사진인지 불확실함
+- 검색 이미지, 스톡 이미지, 블로그/배달앱/상품 사진처럼 보임
+- 화면을 다시 찍은 사진 또는 인쇄물을 찍은 사진처럼 보임
+- QR 검증 실패
+- raw 이미지 누락
+- OpenAI quota/429 오류
+- 기타 worker가 확정 판정을 내리기 어려운 경우
+
+검색 이미지 또는 웹에서 저장한 사진은 메뉴가 맞더라도 `PASS`가 아니라 `HOLD`가 되어야 합니다.
+관리자는 어드민 리뷰 화면에서 proof 이미지, QR/워터마크, AI 요약, `aiMeta`를 보고 최종 승인/거절합니다.
 
 OpenAI 또는 파일 오류:
 
@@ -101,6 +126,43 @@ OpenAI 또는 파일 오류:
 - QR 실패: `HOLD`
 - 일시 오류: attempts 증가 후 retry 가능
 - attempts 최대 초과: `HOLD`
+
+## 관리자 리뷰 상태 변경 정책
+
+현재 구현:
+
+- `PENDING` 또는 `HOLD` 상태의 Proof만 관리자 수동 리뷰 대상입니다.
+- 관리자가 `PASS` 처리하면 포인트를 지급하고 세션을 `DONE`으로 종료합니다.
+- 관리자가 `FAIL` 처리하면 포인트를 지급하지 않고 세션을 `DONE`으로 종료합니다.
+- 일반 리뷰 엔드포인트 `POST /proofs/:id/review`는 이미 `PASS` 또는 `FAIL`인 Proof를 idempotent하게 반환합니다.
+- 최종 판정 정정은 별도 엔드포인트 `POST /proofs/:id/correct-review`를 사용합니다.
+
+정정 정책:
+
+- `PASS` → `FAIL` 가능
+- `FAIL` → `PASS` 가능
+- 정정 사유는 필수입니다.
+- `Proof.aiResult`를 최종 상태로 변경합니다.
+- `Proof.aiMeta.corrections`에 변경 전/후 상태, 사유, 시각, 관리자 정보를 append합니다.
+- `RecommendSession`은 `DONE` 상태를 유지합니다.
+
+포인트 보정:
+
+- `PASS` → `FAIL`
+  - 기존 지급 ledger는 삭제하지 않습니다.
+  - `PointLedger`에 `ADJUST` / `ADMIN` / 음수 points 회수 내역을 추가합니다.
+  - 유저 `pointBalance`를 같은 트랜잭션에서 차감합니다.
+- `FAIL` → `PASS`
+  - `PointLedger`에 `ADJUST` / `ADMIN` / 양수 points 재지급 내역을 추가합니다.
+  - 유저 `pointBalance`를 같은 트랜잭션에서 증가시킵니다.
+
+정정 ledger의 `source`는 `ADMIN`입니다.
+그래야 모바일 포인트 내역에서 Proof 카드와 중복 제거되는 `source=PROOF` 필터에 걸리지 않고, 관리자 정정 내역이 사용자에게 보입니다.
+
+중복 방지:
+
+- 정정 ledger는 `PROOF:CORRECTION:<proofId>:<sequence>:<FROM>_TO_<TO>` 형태의 `dedupeKey`를 사용합니다.
+- sequence는 `Proof.aiMeta.corrections.length + 1` 기준입니다.
 
 ## 상태별 유저 표시
 

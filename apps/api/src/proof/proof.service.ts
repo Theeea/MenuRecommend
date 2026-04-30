@@ -15,6 +15,7 @@ import sharp from 'sharp';
 import jsQR from 'jsqr';
 import { createHmac, timingSafeEqual } from 'crypto';
 import OpenAI from 'openai';
+import { proofResultLabel } from '@menu-reward/shared';
 
 type AiDecision = {
   match: boolean;
@@ -348,6 +349,114 @@ export class ProofService {
     });
 
     return { ok: true, ...updated };
+  }
+
+  /**
+   * 관리자 최종 판정 정정.
+   * - PASS -> FAIL: 지급 포인트 회수 ledger 생성
+   * - FAIL -> PASS: 정정 지급 ledger 생성
+   * 기존 지급/거절 기록은 삭제하지 않고 aiMeta.corrections와 PointLedger에 보정 이력을 남긴다.
+   */
+  async correctReviewByAdminKey(
+    adminKey: string | undefined,
+    proofId: string,
+    body: {
+      result: 'PASS' | 'FAIL';
+      reason?: string;
+      score?: number;
+      model?: string;
+      meta?: any;
+    },
+  ) {
+    assertAdminKey(adminKey);
+
+    const result = body?.result;
+    if (result !== 'PASS' && result !== 'FAIL') {
+      throw new BadRequestException('result must be PASS|FAIL');
+    }
+
+    const reason = String(body?.reason ?? '').trim();
+    if (!reason) {
+      throw new BadRequestException('reason is required');
+    }
+
+    const score =
+      body?.score != null && Number.isFinite(Number(body.score))
+        ? Math.max(0, Math.min(100, Number(body.score)))
+        : undefined;
+
+    const p = await this.prisma.proof.findUnique({
+      where: { id: proofId },
+      include: { session: true },
+    });
+
+    if (!p) throw new NotFoundException('proof not found');
+
+    const from = String(p.aiResult);
+    if (from !== 'PASS' && from !== 'FAIL') {
+      throw new BadRequestException(
+        'Only final PASS/FAIL proof can be corrected',
+      );
+    }
+    if (from === result) {
+      return { ok: true, unchanged: true, proof: p };
+    }
+
+    const corrected = await this.prisma.$transaction(async (tx) => {
+      const meta = (p.aiMeta as any) ?? {};
+      const previousCorrections = Array.isArray(meta.corrections)
+        ? meta.corrections
+        : [];
+      const sequence = previousCorrections.length + 1;
+      const nowIso = new Date().toISOString();
+      const correction = {
+        at: nowIso,
+        by: 'admin',
+        from,
+        to: result,
+        reason,
+        ...(body?.meta ? { meta: body.meta } : {}),
+      };
+
+      const pointAdjustment = await this.applyReviewCorrectionPoints(
+        tx,
+        p.session.userId,
+        proofId,
+        from as 'PASS' | 'FAIL',
+        result,
+        sequence,
+        reason,
+      );
+
+      const proof = await tx.proof.update({
+        where: { id: proofId },
+        data: {
+          aiResult: result as any,
+          ...(score != null ? { aiScore: score } : {}),
+          aiModel: body?.model ?? p.aiModel ?? null,
+          aiMeta: {
+            ...meta,
+            corrections: [...previousCorrections, correction],
+            reviewedBy: 'admin',
+            correctedAt: nowIso,
+            correctionReason: reason,
+            processingAt: null,
+            processedAt: nowIso,
+          },
+          reviewedAt: new Date(),
+        },
+        include: { session: true },
+      });
+
+      await tx.recommendSession.update({
+        where: { id: p.sessionId },
+        data: { status: 'DONE' as any, doneAt: p.session.doneAt ?? new Date() },
+      });
+
+      return { proof, correction, pointAdjustment };
+    });
+
+    return { ok: true, ...corrected };
   }
 
   /**
@@ -915,5 +1024,81 @@ export class ProofService {
     });
 
     return { ok: true, earned: bonus, balanceAfter: updated.pointBalance };
+  }
+
+  private async applyReviewCorrectionPoints(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    proofId: string,
+    from: 'PASS' | 'FAIL',
+    to: 'PASS' | 'FAIL',
+    sequence: number,
+    reason: string,
+  ) {
+    const configuredBonus = Number(process.env.PROOF_PASS_BONUS ?? 40);
+    const fallbackBonus =
+      Number.isFinite(configuredBonus) && configuredBonus > 0
+        ? Math.round(configuredBonus)
+        : 40;
+
+    const passLedger = await tx.pointLedger.findUnique({
+      where: { dedupeKey: `PROOF:PASS:${proofId}` },
+      select: { id: true, points: true, balanceAfter: true },
+    });
+
+    const basePoints =
+      passLedger?.points && Number.isFinite(Number(passLedger.points))
+        ? Math.abs(Number(passLedger.points))
+        : fallbackBonus;
+
+    const points = from === 'PASS' && to === 'FAIL' ? -basePoints : basePoints;
+    const dedupeKey = `PROOF:CORRECTION:${proofId}:${sequence}:${from}_TO_${to}`;
+
+    const existing = await tx.pointLedger.findUnique({
+      where: { dedupeKey },
+      select: { id: true, points: true, balanceAfter: true },
+    });
+
+    if (existing) {
+      return {
+        ok: true,
+        points: existing.points,
+        balanceAfter: existing.balanceAfter,
+        deduped: true,
+      };
+    }
+
+    const user = await tx.user.findUnique({
+      where: { id: userId },
+      select: { id: true, pointBalance: true },
+    });
+    if (!user) throw new Error('user not found');
+
+    const next = (user.pointBalance ?? 0) + points;
+    const updated = await tx.user.update({
+      where: { id: userId },
+      data: { pointBalance: next },
+      select: { pointBalance: true },
+    });
+
+    const fromLabel = proofResultLabel(from, from);
+    const toLabel = proofResultLabel(to, to);
+
+    await tx.pointLedger.create({
+      data: {
+        userId,
+        kind: 'ADJUST' as any,
+        source: 'ADMIN' as any,
+        sourceId: proofId,
+        proofId,
+        points,
+        balanceAfter: updated.pointBalance,
+        note: `인증 판정 정정 ${fromLabel}->${toLabel}: ${reason}`,
+        dedupeKey,
+      },
+      select: { id: true },
+    });
+
+    return { ok: true, points, balanceAfter: updated.pointBalance };
   }
 }

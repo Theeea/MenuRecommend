@@ -660,6 +660,219 @@ describe('ProofService.reviewByAdminKey', () => {
   });
 });
 
+describe('ProofService.correctReviewByAdminKey', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+    delete process.env.ADMIN_REVIEW_KEY;
+    delete process.env.PROOF_PASS_BONUS;
+  });
+
+  it('corrects PASS to FAIL and creates a negative admin adjustment ledger', async () => {
+    process.env.ADMIN_REVIEW_KEY = 'admin-secret';
+    process.env.PROOF_PASS_BONUS = '40';
+
+    const mock = createPrismaMock();
+    const service = makeService(mock);
+    const proof = {
+      id: 'proof-1',
+      sessionId: 'session-1',
+      imageUrl: '/uploads/proof/proof-1.jpg',
+      aiResult: ProofResult.PASS,
+      aiScore: 95,
+      aiModel: 'admin',
+      aiMeta: { rawUrl: '/uploads/raw/raw-1.jpg' },
+      createdAt: new Date('2026-04-29T01:00:00.000Z'),
+      reviewedAt: new Date('2026-04-29T01:10:00.000Z'),
+      reviewedByAdminId: null,
+      session: baseSession({
+        status: 'DONE',
+        doneAt: new Date('2026-04-29T01:10:00.000Z'),
+      }),
+    };
+    const updatedProof = {
+      ...proof,
+      aiResult: ProofResult.FAIL,
+    };
+
+    mock.prisma.proof.findUnique.mockResolvedValue(proof);
+    mock.tx.pointLedger.findUnique
+      .mockResolvedValueOnce({
+        id: 'pass-ledger',
+        points: 40,
+        balanceAfter: 160,
+      })
+      .mockResolvedValueOnce(null);
+    mock.tx.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      pointBalance: 160,
+    });
+    mock.tx.user.update.mockResolvedValue({ pointBalance: 120 });
+    mock.tx.pointLedger.create.mockResolvedValue({ id: 'correction-ledger' });
+    mock.tx.proof.update.mockResolvedValue(updatedProof);
+    mock.tx.recommendSession.update.mockResolvedValue({});
+
+    const result = (await service.correctReviewByAdminKey(
+      'admin-secret',
+      'proof-1',
+      { result: 'FAIL', reason: '검색 이미지로 확인됨' },
+    )) as any;
+
+    expect(result.ok).toBe(true);
+    expect(result.pointAdjustment).toEqual({
+      ok: true,
+      points: -40,
+      balanceAfter: 120,
+    });
+    expect(mock.tx.pointLedger.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        userId: 'user-1',
+        kind: 'ADJUST',
+        source: 'ADMIN',
+        sourceId: 'proof-1',
+        proofId: 'proof-1',
+        points: -40,
+        balanceAfter: 120,
+        dedupeKey: 'PROOF:CORRECTION:proof-1:1:PASS_TO_FAIL',
+      }),
+      select: { id: true },
+    });
+    expect(mock.tx.proof.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'proof-1' },
+        data: expect.objectContaining({
+          aiResult: 'FAIL',
+          aiMeta: expect.objectContaining({
+            corrections: [
+              expect.objectContaining({
+                from: 'PASS',
+                to: 'FAIL',
+                reason: '검색 이미지로 확인됨',
+              }),
+            ],
+            correctionReason: '검색 이미지로 확인됨',
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('corrects FAIL to PASS and creates a positive admin adjustment ledger', async () => {
+    process.env.ADMIN_REVIEW_KEY = 'admin-secret';
+    process.env.PROOF_PASS_BONUS = '40';
+
+    const mock = createPrismaMock();
+    const service = makeService(mock);
+    const proof = {
+      id: 'proof-1',
+      sessionId: 'session-1',
+      imageUrl: '/uploads/proof/proof-1.jpg',
+      aiResult: ProofResult.FAIL,
+      aiScore: 88,
+      aiModel: 'admin',
+      aiMeta: {
+        rawUrl: '/uploads/raw/raw-1.jpg',
+        corrections: [{ from: 'PASS', to: 'FAIL', reason: '이전 정정' }],
+      },
+      createdAt: new Date('2026-04-29T01:00:00.000Z'),
+      reviewedAt: new Date('2026-04-29T01:10:00.000Z'),
+      reviewedByAdminId: null,
+      session: baseSession({
+        status: 'DONE',
+        doneAt: new Date('2026-04-29T01:10:00.000Z'),
+      }),
+    };
+    const updatedProof = {
+      ...proof,
+      aiResult: ProofResult.PASS,
+    };
+
+    mock.prisma.proof.findUnique.mockResolvedValue(proof);
+    mock.tx.pointLedger.findUnique
+      .mockResolvedValueOnce({
+        id: 'pass-ledger',
+        points: 40,
+        balanceAfter: 160,
+      })
+      .mockResolvedValueOnce(null);
+    mock.tx.user.findUnique.mockResolvedValue({
+      id: 'user-1',
+      pointBalance: 120,
+    });
+    mock.tx.user.update.mockResolvedValue({ pointBalance: 160 });
+    mock.tx.pointLedger.create.mockResolvedValue({ id: 'correction-ledger' });
+    mock.tx.proof.update.mockResolvedValue(updatedProof);
+    mock.tx.recommendSession.update.mockResolvedValue({});
+
+    const result = (await service.correctReviewByAdminKey(
+      'admin-secret',
+      'proof-1',
+      { result: 'PASS', reason: '실제 촬영 사진으로 확인됨' },
+    )) as any;
+
+    expect(result.ok).toBe(true);
+    expect(result.pointAdjustment).toEqual({
+      ok: true,
+      points: 40,
+      balanceAfter: 160,
+    });
+    expect(mock.tx.pointLedger.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        kind: 'ADJUST',
+        source: 'ADMIN',
+        points: 40,
+        balanceAfter: 160,
+        dedupeKey: 'PROOF:CORRECTION:proof-1:2:FAIL_TO_PASS',
+      }),
+      select: { id: true },
+    });
+    expect(mock.tx.proof.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          aiResult: 'PASS',
+          aiMeta: expect.objectContaining({
+            corrections: [
+              { from: 'PASS', to: 'FAIL', reason: '이전 정정' },
+              expect.objectContaining({
+                from: 'FAIL',
+                to: 'PASS',
+                reason: '실제 촬영 사진으로 확인됨',
+              }),
+            ],
+          }),
+        }),
+      }),
+    );
+  });
+
+  it('requires a reason and only corrects final PASS/FAIL proofs', async () => {
+    process.env.ADMIN_REVIEW_KEY = 'admin-secret';
+
+    const mock = createPrismaMock();
+    const service = makeService(mock);
+
+    await expect(
+      service.correctReviewByAdminKey('admin-secret', 'proof-1', {
+        result: 'FAIL',
+        reason: '',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    mock.prisma.proof.findUnique.mockResolvedValue({
+      id: 'proof-1',
+      aiResult: ProofResult.HOLD,
+      session: baseSession(),
+    });
+
+    await expect(
+      service.correctReviewByAdminKey('admin-secret', 'proof-1', {
+        result: 'PASS',
+        reason: '정정',
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(mock.prisma.$transaction).not.toHaveBeenCalled();
+  });
+});
+
 describe('ProofService.processPendingBatch', () => {
   afterEach(() => {
     jest.restoreAllMocks();
@@ -903,6 +1116,110 @@ describe('ProofService.processPendingBatch', () => {
     expect(mock.tx.recommendSession.update).not.toHaveBeenCalled();
     expect(mock.tx.pointLedger.create).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [
+      'low confidence match',
+      {
+        match: true,
+        confidence: 0.85,
+        detected: ['김치찌개'],
+        reason: 'menu matches, but confidence is below pass threshold',
+        realPhotoLikely: true,
+        screenOrPrintSuspicion: false,
+        stockOrWebImageSuspicion: false,
+        fraudSignals: [],
+      },
+      85,
+    ],
+    [
+      'not likely a real user-taken photo',
+      {
+        match: true,
+        confidence: 0.97,
+        detected: ['김치찌개'],
+        reason: 'looks like a staged or non-user photo',
+        realPhotoLikely: false,
+        screenOrPrintSuspicion: false,
+        stockOrWebImageSuspicion: false,
+        fraudSignals: ['not-real-photo'],
+      },
+      97,
+    ],
+    [
+      'screen or printed image suspicion',
+      {
+        match: true,
+        confidence: 0.96,
+        detected: ['김치찌개'],
+        reason: 'visible screen or printed-photo artifacts',
+        realPhotoLikely: true,
+        screenOrPrintSuspicion: true,
+        stockOrWebImageSuspicion: false,
+        fraudSignals: ['screen-artifact'],
+      },
+      96,
+    ],
+    [
+      'stock or web image suspicion',
+      {
+        match: true,
+        confidence: 0.98,
+        detected: ['김치찌개'],
+        reason: 'looks like a web or stock image',
+        realPhotoLikely: true,
+        screenOrPrintSuspicion: false,
+        stockOrWebImageSuspicion: true,
+        fraudSignals: ['stock-like-composition'],
+      },
+      98,
+    ],
+  ])(
+    'holds a matching proof when AI decision has %s',
+    async (_label, aiDecision, expectedScore) => {
+      const mock = createPrismaMock();
+      const service = makeService(mock);
+      const proof = basePendingProof();
+      const updatedProof = {
+        ...proof,
+        aiResult: ProofResult.HOLD,
+        aiScore: expectedScore,
+      };
+
+      mock.prisma.proof.findMany.mockResolvedValue([proof]);
+      mock.prisma.proof.update
+        .mockResolvedValueOnce({ ...proof })
+        .mockResolvedValueOnce(updatedProof);
+
+      jest
+        .spyOn(service as any, 'tryVerifyQrFromProofImage')
+        .mockResolvedValue(null);
+      jest
+        .spyOn(service as any, 'judgeFoodWithOpenAI')
+        .mockResolvedValue(aiDecision);
+
+      const result = await service.processPendingBatch(5);
+
+      expect(result.results).toEqual([
+        { id: 'proof-1', result: 'HOLD', score: expectedScore },
+      ]);
+      expect(mock.prisma.proof.update).toHaveBeenNthCalledWith(2, {
+        where: { id: 'proof-1' },
+        data: expect.objectContaining({
+          aiResult: 'HOLD',
+          aiScore: expectedScore,
+          reviewedAt: null,
+          aiMeta: expect.objectContaining({
+            openai: expect.objectContaining(aiDecision),
+          }),
+        }),
+      });
+      expect(mock.prisma.recommendSession.update).not.toHaveBeenCalled();
+      expect(mock.tx.recommendSession.update).not.toHaveBeenCalled();
+      expect(mock.tx.pointLedger.create).not.toHaveBeenCalled();
+      expect(mock.tx.user.update).not.toHaveBeenCalled();
+    },
+  );
 
   it('moves a proof without rawUrl to HOLD for manual review', async () => {
     const mock = createPrismaMock();

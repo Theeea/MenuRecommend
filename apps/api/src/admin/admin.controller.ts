@@ -556,6 +556,22 @@ export class AdminController {
     }
   }
 
+  async function correctReview(proofId, result){
+    if(!ensureKeyOrShow()) return;
+    const reason = prompt("판정 정정 사유를 입력해줘", "");
+    if(!reason || !reason.trim()) return alert("정정 사유는 필수입니다.");
+    if(!confirm("최종 판정을 " + label(PROOF_RESULT_LABELS, result, result) + "(으)로 정정할까? 포인트도 함께 보정됩니다.")) return;
+    try{
+      await api("/proofs/" + proofId + "/correct-review", {
+        method: "POST",
+        body: JSON.stringify({ result, reason: reason.trim() })
+      });
+      await reload(true);
+    }catch(e){
+      alert("정정 실패: " + e.message);
+    }
+  }
+
   function renderStats(s){
     const el = document.getElementById("stats");
     el.innerHTML = \`
@@ -577,6 +593,44 @@ export class AdminController {
 
   function processingPill(it){
     return it.isProcessing ? '<span class="pill processing">AI ${PROOF_PROCESSING_LABEL}</span>' : '';
+  }
+
+  function aiDecisionSummary(it){
+    const openai = it && it.aiMeta && it.aiMeta.openai ? it.aiMeta.openai : null;
+    if(!openai || typeof openai !== "object") return "";
+
+    const confidence = Number(openai.confidence);
+    const confidenceText = Number.isFinite(confidence) ? Math.round(confidence * 100) + "%" : "-";
+    const boolText = (v) => v === true ? "예" : v === false ? "아니오" : "-";
+    const fraudSignals = Array.isArray(openai.fraudSignals) ? openai.fraudSignals : [];
+
+    const fraudHtml = fraudSignals.length
+      ? '<div class="row">'+fraudSignals.map(x => '<span class="pill reason REVIEW">'+escapeHtml(x)+'</span>').join("")+'</div>'
+      : "";
+
+    return '' +
+      '<div class="box" style="padding:10px;background:#fafafa">' +
+        '<div class="row">' +
+          '<span class="pill">AI confidence: '+escapeHtml(confidenceText)+'</span>' +
+          '<span class="pill">실제 촬영 가능성: '+escapeHtml(boolText(openai.realPhotoLikely))+'</span>' +
+          '<span class="pill">화면/인쇄 의심: '+escapeHtml(boolText(openai.screenOrPrintSuspicion))+'</span>' +
+          '<span class="pill">웹/스톡 의심: '+escapeHtml(boolText(openai.stockOrWebImageSuspicion))+'</span>' +
+        '</div>' +
+        (openai.reason ? '<div class="muted" style="margin-top:6px">'+escapeHtml(openai.reason)+'</div>' : '') +
+        fraudHtml +
+      '</div>';
+  }
+
+  function actionButtons(it){
+    if(it.aiResult === "PASS"){
+      return '<button class="fail" onclick="correctReview(\\''+escapeHtml(it.id)+'\\',\\'FAIL\\')">정정: '+escapeHtml(label(PROOF_RESULT_LABELS, "FAIL", "FAIL"))+'</button>';
+    }
+    if(it.aiResult === "FAIL"){
+      return '<button class="pass" onclick="correctReview(\\''+escapeHtml(it.id)+'\\',\\'PASS\\')">정정: '+escapeHtml(label(PROOF_RESULT_LABELS, "PASS", "PASS"))+'</button>';
+    }
+    return '' +
+      '<button class="pass" onclick="review(\\''+escapeHtml(it.id)+'\\',\\'PASS\\')">'+escapeHtml(label(PROOF_RESULT_LABELS, "PASS", "PASS"))+'</button>' +
+      '<button class="fail" onclick="review(\\''+escapeHtml(it.id)+'\\',\\'FAIL\\')">'+escapeHtml(label(PROOF_RESULT_LABELS, "FAIL", "FAIL"))+'</button>';
   }
 
   function renderList(items){
@@ -601,9 +655,9 @@ export class AdminController {
               <span class="pill">code: \${escapeHtml(it.challengeCode || "-")}</span>
             </div>
             <div class="actions">
-              <button class="pass" onclick="review('\${it.id}','PASS')">\${label(PROOF_RESULT_LABELS, "PASS", "PASS")}</button>
-              <button class="fail" onclick="review('\${it.id}','FAIL')">\${label(PROOF_RESULT_LABELS, "FAIL", "FAIL")}</button>
+              \${actionButtons(it)}
             </div>
+            \${aiDecisionSummary(it)}
             <pre>\${escapeHtml(JSON.stringify(it.aiMeta || {}, null, 2))}</pre>
           </div>
         </div>

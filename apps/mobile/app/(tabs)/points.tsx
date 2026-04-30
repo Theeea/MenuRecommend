@@ -192,6 +192,24 @@ function proofPointsText(p: ProofItem) {
     return `+0점 (${p.isProcessing ? proofProcessingLabel() : proofResultLabel("PENDING")})`;
 }
 
+function ledgerTitle(l: LedgerItem) {
+    const note = String(l.note ?? "").trim();
+    const correction = note.match(/^proof review correction\s+(PASS|FAIL)->(PASS|FAIL):\s*(.*)$/i);
+    if (correction) {
+        const from = proofResultLabel(correction[1].toUpperCase(), correction[1]);
+        const to = proofResultLabel(correction[2].toUpperCase(), correction[2]);
+        const reason = correction[3]?.trim();
+        return reason ? `인증 판정 정정: ${from} → ${to} · ${reason}` : `인증 판정 정정: ${from} → ${to}`;
+    }
+
+    if (note.startsWith("인증 판정 정정 ")) {
+        return note.replace(/^인증 판정 정정\s+/, "인증 판정 정정: ");
+    }
+
+    if (note) return note;
+    return pointKindLabel(l.kind, "") || "포인트 변동";
+}
+
 // ✅ rawUrl 우선순위 계산(서버가 rawUrl을 안 주고 aiMeta.rawUrl만 주는 케이스까지 커버)
 function getRawUrl(p: ProofItem): string | null {
     const direct = typeof p.rawUrl === "string" ? p.rawUrl : null;
@@ -446,7 +464,7 @@ export default function PointsScreen() {
 
         const l = item.ledger;
         const sign = l.points >= 0 ? "+" : "";
-        const title = l.note || pointKindLabel(l.kind, "") || "포인트 변동";
+        const title = ledgerTitle(l);
         const source = pointSourceLabel(l.source, "");
 
         return (
