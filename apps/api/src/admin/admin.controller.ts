@@ -16,6 +16,7 @@ import {
   DISH_TYPE_LABELS,
   INGREDIENT_ROLE_LABELS,
   MENU_DRAFT_STATUS_LABELS,
+  PROOF_PROCESSING_LABEL,
   PROOF_RESULT_LABELS,
   REMOVABLE_LABELS,
 } from '@menu-reward/shared';
@@ -289,10 +290,10 @@ export class AdminController {
 
 <main>
   <div class="tabs">
-    <div class="tab active" data-bucket="need" onclick="setBucket('need')">리뷰필요( PENDING/HOLD )</div>
-    <div class="tab" data-bucket="pass" onclick="setBucket('pass')">PASS</div>
-    <div class="tab" data-bucket="fail" onclick="setBucket('fail')">FAIL</div>
-    <div class="tab" data-bucket="all" onclick="setBucket('all')">ALL</div>
+    <div class="tab active" data-bucket="need" onclick="setBucket('need')">리뷰필요( ${PROOF_RESULT_LABELS.PENDING}/${PROOF_RESULT_LABELS.HOLD} )</div>
+    <div class="tab" data-bucket="pass" onclick="setBucket('pass')">${PROOF_RESULT_LABELS.PASS}</div>
+    <div class="tab" data-bucket="fail" onclick="setBucket('fail')">${PROOF_RESULT_LABELS.FAIL}</div>
+    <div class="tab" data-bucket="all" onclick="setBucket('all')">전체</div>
   </div>
 
   <div class="stats" id="stats"></div>
@@ -312,7 +313,7 @@ export class AdminController {
       <option value="20" selected>20</option>
       <option value="50">50</option>
     </select>
-    <label>HOLD 사유</label>
+    <label>${PROOF_RESULT_LABELS.HOLD} 사유</label>
     <select id="holdReason">
       <option value="ALL" selected>전체</option>
       <option value="QUOTA">QUOTA / 429</option>
@@ -543,7 +544,7 @@ export class AdminController {
 
   async function review(proofId, result){
     if(!ensureKeyOrShow()) return;
-    if(!confirm(result + " 처리할까?")) return;
+    if(!confirm(label(PROOF_RESULT_LABELS, result, result) + " 처리할까?")) return;
     try{
       await api("/proofs/" + proofId + "/review", {
         method: "POST",
@@ -571,11 +572,11 @@ export class AdminController {
 
   function reasonPill(it){
     if(!it.holdReason) return "";
-    return '<span class="pill reason '+escapeHtml(it.holdReason)+'">HOLD: '+escapeHtml(it.holdReason)+'</span>';
+    return '<span class="pill reason '+escapeHtml(it.holdReason)+'">'+escapeHtml(label(PROOF_RESULT_LABELS, "HOLD", "HOLD"))+': '+escapeHtml(it.holdReason)+'</span>';
   }
 
   function processingPill(it){
-    return it.isProcessing ? '<span class="pill processing">AI 진행중</span>' : '';
+    return it.isProcessing ? '<span class="pill processing">AI ${PROOF_PROCESSING_LABEL}</span>' : '';
   }
 
   function renderList(items){
@@ -600,8 +601,8 @@ export class AdminController {
               <span class="pill">code: \${escapeHtml(it.challengeCode || "-")}</span>
             </div>
             <div class="actions">
-              <button class="pass" onclick="review('\${it.id}','PASS')">PASS</button>
-              <button class="fail" onclick="review('\${it.id}','FAIL')">FAIL</button>
+              <button class="pass" onclick="review('\${it.id}','PASS')">\${label(PROOF_RESULT_LABELS, "PASS", "PASS")}</button>
+              <button class="fail" onclick="review('\${it.id}','FAIL')">\${label(PROOF_RESULT_LABELS, "FAIL", "FAIL")}</button>
             </div>
             <pre>\${escapeHtml(JSON.stringify(it.aiMeta || {}, null, 2))}</pre>
           </div>
@@ -1062,7 +1063,7 @@ export class AdminController {
       <button id="generateBtn" onclick="generateDrafts()">AI 생성</button>
     </div>
     <div class="muted" style="margin-top:10px">
-      AI 결과는 바로 추천 메뉴에 들어가지 않고 PENDING 초안으로 저장됩니다. 승인해야 실제 Menu/Ingredient에 반영됩니다.
+      AI 결과는 바로 추천 메뉴에 들어가지 않고 ${MENU_DRAFT_STATUS_LABELS.PENDING} 초안으로 저장됩니다. ${MENU_DRAFT_STATUS_LABELS.APPROVED}해야 실제 Menu/Ingredient에 반영됩니다.
     </div>
   </div>
 
@@ -1246,21 +1247,21 @@ export class AdminController {
 
   async function approveDraft(id){
     if(!ensureKeyOrShow()) return;
-    if(!confirm("이 초안을 실제 메뉴 DB에 승인 반영할까?")) return;
-    setStatus("승인 처리중...");
+    if(!confirm("이 초안을 실제 메뉴 DB에 "+label(MENU_DRAFT_STATUS_LABELS, "APPROVED", "승인")+" 반영할까?")) return;
+    setStatus(label(MENU_DRAFT_STATUS_LABELS, "APPROVED", "승인") + " 처리중...");
     try{
       await api("/admin/menu-drafts/" + encodeURIComponent(id) + "/approve", { method:"POST" });
       await loadDrafts();
     }catch(e){
       setStatus("에러: " + e.message);
-      alert("승인 실패: " + e.message);
+      alert(label(MENU_DRAFT_STATUS_LABELS, "APPROVED", "승인") + " 실패: " + e.message);
     }
   }
 
   async function rejectDraft(id){
     if(!ensureKeyOrShow()) return;
-    const reason = prompt("거절 사유", "") || "";
-    setStatus("거절 처리중...");
+    const reason = prompt(label(MENU_DRAFT_STATUS_LABELS, "REJECTED", "거절") + " 사유", "") || "";
+    setStatus(label(MENU_DRAFT_STATUS_LABELS, "REJECTED", "거절") + " 처리중...");
     try{
       await api("/admin/menu-drafts/" + encodeURIComponent(id) + "/reject", {
         method:"POST",
@@ -1269,7 +1270,7 @@ export class AdminController {
       await loadDrafts();
     }catch(e){
       setStatus("에러: " + e.message);
-      alert("거절 실패: " + e.message);
+      alert(label(MENU_DRAFT_STATUS_LABELS, "REJECTED", "거절") + " 실패: " + e.message);
     }
   }
 
@@ -1288,7 +1289,7 @@ export class AdminController {
     const meta = it && it.aiMeta && typeof it.aiMeta === "object" ? it.aiMeta : {};
     const reason = meta.rejectReason || "";
     if(!reason) return "";
-    return '<div class="muted"><strong>거절 사유:</strong> '+escapeHtml(reason)+'</div>';
+    return '<div class="muted"><strong>'+escapeHtml(label(MENU_DRAFT_STATUS_LABELS, "REJECTED", "거절"))+' 사유:</strong> '+escapeHtml(reason)+'</div>';
   }
 
   function renderDrafts(items){
@@ -1315,8 +1316,8 @@ export class AdminController {
         '<div>'+tags.map((x) => '<span class="pill">'+escapeHtml(x)+'</span>').join("")+'</div>' +
         '<div>'+ingredientPills(it.ingredients)+'</div>' +
         '<div class="actions">' +
-          '<button class="pass" '+(isPending ? "" : "disabled")+' data-id="'+idAttr+'" onclick="approveDraft(this.dataset.id)">승인</button>' +
-          '<button class="fail" '+(isPending ? "" : "disabled")+' data-id="'+idAttr+'" onclick="rejectDraft(this.dataset.id)">거절</button>' +
+          '<button class="pass" '+(isPending ? "" : "disabled")+' data-id="'+idAttr+'" onclick="approveDraft(this.dataset.id)">'+escapeHtml(label(MENU_DRAFT_STATUS_LABELS, "APPROVED", "승인"))+'</button>' +
+          '<button class="fail" '+(isPending ? "" : "disabled")+' data-id="'+idAttr+'" onclick="rejectDraft(this.dataset.id)">'+escapeHtml(label(MENU_DRAFT_STATUS_LABELS, "REJECTED", "거절"))+'</button>' +
         '</div>' +
         '<pre>'+escapeHtml(JSON.stringify(it.aiMeta || {}, null, 2))+'</pre>' +
       '</div>';

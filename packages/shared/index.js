@@ -54,6 +54,15 @@ const PROOF_RESULT_LABELS = {
   FAIL: "거절",
 };
 
+const PROOF_PROCESSING_LABEL = "진행중";
+
+const PROOF_UPLOAD_BLOCK_MESSAGES = {
+  PENDING: "현재 인증이 검토중이라 추가 업로드가 제한돼요.",
+  HOLD: "현재 인증이 보류(검토) 상태라 추가 업로드가 제한돼요.",
+  PASS: "이미 승인된 인증이 있어 추가 촬영/업로드가 제한돼요.",
+  FAIL: "이미 거절 처리된 인증이 있어 추가 촬영/업로드가 제한돼요.",
+};
+
 const MENU_DRAFT_STATUS_LABELS = {
   PENDING: "검수 대기",
   APPROVED: "승인",
@@ -110,6 +119,14 @@ function proofResultLabel(value, fallback = "") {
   return labelFrom(PROOF_RESULT_LABELS, value, fallback);
 }
 
+function proofProcessingLabel() {
+  return PROOF_PROCESSING_LABEL;
+}
+
+function proofUploadBlockMessage(value, fallback = "") {
+  return labelFrom(PROOF_UPLOAD_BLOCK_MESSAGES, value, fallback);
+}
+
 function menuDraftStatusLabel(value, fallback = "") {
   return labelFrom(MENU_DRAFT_STATUS_LABELS, value, fallback);
 }
@@ -162,6 +179,8 @@ module.exports = {
   RECOMMEND_CUISINE_OPTIONS,
   DISH_TYPE_LABELS,
   PROOF_RESULT_LABELS,
+  PROOF_PROCESSING_LABEL,
+  PROOF_UPLOAD_BLOCK_MESSAGES,
   MENU_DRAFT_STATUS_LABELS,
   RECOMMEND_STATUS_LABELS,
   POINT_KIND_LABELS,
@@ -171,6 +190,8 @@ module.exports = {
   cuisineLabel,
   dishTypeLabel,
   proofResultLabel,
+  proofProcessingLabel,
+  proofUploadBlockMessage,
   menuDraftStatusLabel,
   recommendStatusLabel,
   pointKindLabel,

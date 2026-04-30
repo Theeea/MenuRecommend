@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import { pointKindLabel, pointSourceLabel, proofResultLabel } from "@menu-reward/shared";
+import { pointKindLabel, pointSourceLabel, proofProcessingLabel, proofResultLabel } from "@menu-reward/shared";
 import { useAuth } from "../../src/auth/authStore";
 
 type LedgerItem = {
@@ -181,7 +181,7 @@ async function apiFetch<T>(
 }
 
 function proofStatusLabel(aiResult: ProofItem["aiResult"], isProcessing: boolean) {
-    if (aiResult === "PENDING" && isProcessing) return "진행중";
+    if (aiResult === "PENDING" && isProcessing) return proofProcessingLabel();
     return proofResultLabel(aiResult, aiResult);
 }
 
@@ -189,7 +189,7 @@ function proofPointsText(p: ProofItem) {
     if (p.aiResult === "PASS") return `+${fmtNumber(p.earnedPoints)}점 (${proofResultLabel("PASS")})`;
     if (p.aiResult === "FAIL") return `+0점 (${proofResultLabel("FAIL")})`;
     if (p.aiResult === "HOLD") return `+0점 (${proofResultLabel("HOLD")})`;
-    return `+0점 (${p.isProcessing ? "진행중" : proofResultLabel("PENDING")})`;
+    return `+0점 (${p.isProcessing ? proofProcessingLabel() : proofResultLabel("PENDING")})`;
 }
 
 // ✅ rawUrl 우선순위 계산(서버가 rawUrl을 안 주고 aiMeta.rawUrl만 주는 케이스까지 커버)

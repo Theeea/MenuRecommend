@@ -3,7 +3,7 @@ import { Alert, ActivityIndicator, Image, Pressable, Text, View } from "react-na
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
-import { proofResultLabel } from "@menu-reward/shared";
+import { proofResultLabel, proofUploadBlockMessage } from "@menu-reward/shared";
 import { api } from "../src/api/client";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -64,11 +64,7 @@ export default function Proof() {
 
     const blockedText = useMemo(() => {
         if (!currentAiResult) return "";
-        if (currentAiResult === "PENDING") return "현재 인증이 검토중이라 추가 업로드가 제한돼요.";
-        if (currentAiResult === "HOLD") return "현재 인증이 보류(검토) 상태라 추가 업로드가 제한돼요.";
-        if (currentAiResult === "PASS") return "이미 승인된 인증이 있어 추가 촬영/업로드가 제한돼요.";
-        if (currentAiResult === "FAIL") return "이미 거절 처리된 인증이 있어 추가 촬영/업로드가 제한돼요.";
-        return "";
+        return proofUploadBlockMessage(currentAiResult);
     }, [currentAiResult]);
 
     const canSubmit = useMemo(() => {
@@ -142,7 +138,7 @@ export default function Proof() {
             if (code === "PROOF_PENDING") {
                 await refreshProofStatus();
                 Alert.alert(
-                    "검토중",
+                    proofResultLabel("PENDING"),
                     "이미 인증이 접수되어 검토중이에요.\n포인트 내역에서 진행상태를 확인해줘.",
                     [
                         { text: "포인트 보기", onPress: () => router.replace("/(tabs)/points") },
@@ -205,14 +201,7 @@ export default function Proof() {
         const latest = await refreshProofStatus();
         const ai = (latest?.proof?.aiResult ?? null) as any;
         if (latest?.proof) {
-            const msg =
-                ai === "PENDING"
-                    ? "현재 인증이 검토중이라 추가 업로드가 제한돼요."
-                    : ai === "HOLD"
-                        ? "현재 인증이 보류(검토) 상태라 추가 업로드가 제한돼요."
-                        : ai === "PASS"
-                            ? "이미 승인된 인증이 있어 추가 업로드가 제한돼요."
-                            : "이미 거절 처리된 인증이 있어 추가 업로드가 제한돼요.";
+            const msg = proofUploadBlockMessage(ai);
             Alert.alert(
                 "추가 업로드 불가",
                 `${msg}\n\n현재 상태: ${proofResultLabel(ai, ai)}\n포인트 내역에서 진행/결과를 확인할 수 있어요.`,
@@ -269,11 +258,7 @@ export default function Proof() {
             const balance = data?.balance ?? 0;
             const aiResult = data?.aiResult ?? "PENDING";
 
-            let extraMsg = "";
-            if (aiResult === "PASS") extraMsg = "\nAI 판정: 통과 ✅";
-            else if (aiResult === "HOLD") extraMsg = "\nAI 판정: 보류(검토) ⏳";
-            else if (aiResult === "FAIL") extraMsg = "\nAI 판정: 실패 ❌";
-            else extraMsg = "\nAI 판정: 대기 ⏳";
+            const extraMsg = `\nAI 판정: ${proofResultLabel(aiResult, aiResult)}`;
 
             Alert.alert("인증 접수!", `+${earned}p 적립\n현재 ${balance}p${extraMsg}`, [
                 { text: "포인트 보기", onPress: () => router.replace("/(tabs)/points") },

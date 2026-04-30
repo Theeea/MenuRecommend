@@ -114,3 +114,34 @@ query param으로 관리자 키를 추가하지 않습니다.
 - 포인트 지급 정책 변경
 - 모바일 화면 흐름 변경
 - 운영 명령 변경
+
+## 12. enum/상태 라벨은 공통 패키지 기준
+
+모바일과 어드민에서 enum 값을 사용자에게 직접 노출하지 않습니다.
+표시 문구는 `packages/shared`의 라벨 맵과 헬퍼 함수를 사용합니다.
+
+공통 대상:
+
+- `Cuisine`
+- `DishType`
+- `ProofResult`
+- `MenuDraftStatus`
+- `RecommendStatus`
+- `PointKind`
+- `PointSource`
+- `IngredientRole`
+- `Removable`
+
+새 enum 값이나 화면 표시 문구를 추가할 때 확인할 것:
+
+1. Prisma enum 또는 API 응답 값 확인
+2. `packages/shared/index.js` 라벨/옵션 추가
+3. `packages/shared/index.d.ts` 타입 선언 추가
+4. 모바일 화면에서 shared import 사용
+5. 어드민 HTML 템플릿에서 shared 라벨 맵 사용
+6. API/mobile 타입체크 실행
+
+예외:
+
+- DB 조회 조건, API 요청 payload, 테스트 fixture처럼 시스템 값 자체가 필요한 곳은 enum 원문 값을 사용합니다.
+- 사용자에게 보이는 버튼/탭/배지/상태 문구는 공통 라벨을 사용합니다.
