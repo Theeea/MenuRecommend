@@ -191,7 +191,7 @@ async function apiFetch<T>(
     path: string,
     rawToken: any,
     init?: RequestInit
-): Promise<{ data: T; usedUrl: string }> {
+): Promise<{ data: T }> {
     const { auth } = normalizeAuthHeader(rawToken);
 
     const headers = {
@@ -230,7 +230,7 @@ async function apiFetch<T>(
         throw err;
     }
 
-    return { data: (r.json ?? ({} as any)) as T, usedUrl: r.url };
+    return { data: (r.json ?? ({} as any)) as T };
 }
 
 function proofStatusLabel(aiResult: ProofItem["aiResult"], isProcessing: boolean) {
@@ -355,7 +355,6 @@ export default function PointsScreen() {
     const [refreshing, setRefreshing] = useState(false);
     const [loadingMore, setLoadingMore] = useState(false);
     const [error, setError] = useState<string | null>(null);
-    const [usedUrl, setUsedUrl] = useState<string>("");
 
     // ✅ 이미지 크게보기(모달)
     const [imgModal, setImgModal] = useState<{
@@ -375,7 +374,6 @@ export default function PointsScreen() {
 
     const loadBalance = async () => {
         const r = await apiFetch<any>("/me/points", tokenRaw);
-        setUsedUrl(r.usedUrl);
 
         const res = r.data;
         const pointBalance =
@@ -396,7 +394,6 @@ export default function PointsScreen() {
         if (cursor) qs.set("cursor", cursor);
 
         const r = await apiFetch<any>(`/me/points/ledger?${qs.toString()}`, tokenRaw);
-        setUsedUrl(r.usedUrl);
 
         const res = r.data;
         const items: LedgerItem[] =
@@ -420,7 +417,6 @@ export default function PointsScreen() {
         const qs = new URLSearchParams();
         qs.set("take", "20");
         const r = await apiFetch<any>(`/me/proofs?${qs.toString()}`, tokenRaw);
-        setUsedUrl(r.usedUrl);
 
         const res = r.data;
         const rawItems: any[] = res?.items ?? res?.data?.items ?? [];
@@ -443,7 +439,6 @@ export default function PointsScreen() {
                 apiFetch<any>("/shop/items", tokenRaw),
                 apiFetch<any>("/me/purchases?take=5", tokenRaw),
             ]);
-            setUsedUrl(itemsRes.usedUrl);
             setShopItems(itemsRes.data?.items ?? itemsRes.data?.data?.items ?? []);
             setPurchases(purchasesRes.data?.items ?? purchasesRes.data?.data?.items ?? []);
         } catch {
@@ -816,10 +811,6 @@ export default function PointsScreen() {
                             <Ionicons name="wallet" size={22} color="#fff" />
                         </View>
                     </View>
-
-                {__DEV__ && !!usedUrl && (
-                    <Text style={{ marginTop: 6, fontSize: 11, color: "#9CA3AF" }}>Used URL: {usedUrl}</Text>
-                )}
 
                 {!!error && (
                     <View
