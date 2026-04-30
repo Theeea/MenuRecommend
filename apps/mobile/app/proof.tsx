@@ -3,6 +3,7 @@ import { Alert, ActivityIndicator, Image, Pressable, Text, View } from "react-na
 import { useLocalSearchParams, useRouter } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import * as Haptics from "expo-haptics";
+import { proofResultLabel } from "@menu-reward/shared";
 import { api } from "../src/api/client";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -96,12 +97,7 @@ export default function Proof() {
     }, [sessionId, refreshProofStatus]);
 
     const showBlockedAlert = useCallback(() => {
-        const label =
-            currentAiResult === "PENDING"
-                ? "검토중"
-                : currentAiResult === "HOLD"
-                    ? "보류(검토)"
-                    : currentAiResult;
+        const label = proofResultLabel(currentAiResult, currentAiResult ?? "");
 
         Alert.alert(
             "추가 업로드 불가",
@@ -219,7 +215,7 @@ export default function Proof() {
                             : "이미 거절 처리된 인증이 있어 추가 업로드가 제한돼요.";
             Alert.alert(
                 "추가 업로드 불가",
-                `${msg}\n\n현재 상태: ${ai === "PENDING" ? "검토중" : ai === "HOLD" ? "보류(검토)" : ai === "PASS" ? "승인" : "거절"}\n포인트 내역에서 진행/결과를 확인할 수 있어요.`,
+                `${msg}\n\n현재 상태: ${proofResultLabel(ai, ai)}\n포인트 내역에서 진행/결과를 확인할 수 있어요.`,
                 [
                     { text: "포인트 보기", onPress: () => router.replace("/(tabs)/points") },
                     { text: "닫기", style: "cancel" },
@@ -371,13 +367,7 @@ export default function Proof() {
                             >
                                 <Text style={{ fontWeight: "900", color: "#111" }}>
                                     현재 상태:{" "}
-                                    {currentAiResult === "PENDING"
-                                        ? "검토중"
-                                        : currentAiResult === "HOLD"
-                                            ? "보류(검토)"
-                                            : currentAiResult === "PASS"
-                                                ? "승인"
-                                                : "거절"}
+                                    {proofResultLabel(currentAiResult, currentAiResult ?? "")}
                                 </Text>
                                 {!!blockedText && (
                                     <Text style={{ marginTop: 6, color: "#6B7280", fontWeight: "700", lineHeight: 18 }}>

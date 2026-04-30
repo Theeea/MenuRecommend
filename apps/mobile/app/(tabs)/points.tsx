@@ -14,6 +14,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
+import { pointKindLabel, pointSourceLabel, proofResultLabel } from "@menu-reward/shared";
 import { useAuth } from "../../src/auth/authStore";
 
 type LedgerItem = {
@@ -180,17 +181,15 @@ async function apiFetch<T>(
 }
 
 function proofStatusLabel(aiResult: ProofItem["aiResult"], isProcessing: boolean) {
-    if (aiResult === "PENDING") return isProcessing ? "진행중" : "검토중";
-    if (aiResult === "PASS") return "승인";
-    if (aiResult === "FAIL") return "거절";
-    return "보류"; // HOLD
+    if (aiResult === "PENDING" && isProcessing) return "진행중";
+    return proofResultLabel(aiResult, aiResult);
 }
 
 function proofPointsText(p: ProofItem) {
-    if (p.aiResult === "PASS") return `+${fmtNumber(p.earnedPoints)}점 (승인)`;
-    if (p.aiResult === "FAIL") return `+0점 (거절)`;
-    if (p.aiResult === "HOLD") return `+0점 (보류)`;
-    return `+0점 (${p.isProcessing ? "진행중" : "검토중"})`;
+    if (p.aiResult === "PASS") return `+${fmtNumber(p.earnedPoints)}점 (${proofResultLabel("PASS")})`;
+    if (p.aiResult === "FAIL") return `+0점 (${proofResultLabel("FAIL")})`;
+    if (p.aiResult === "HOLD") return `+0점 (${proofResultLabel("HOLD")})`;
+    return `+0점 (${p.isProcessing ? "진행중" : proofResultLabel("PENDING")})`;
 }
 
 // ✅ rawUrl 우선순위 계산(서버가 rawUrl을 안 주고 aiMeta.rawUrl만 주는 케이스까지 커버)
@@ -447,7 +446,8 @@ export default function PointsScreen() {
 
         const l = item.ledger;
         const sign = l.points >= 0 ? "+" : "";
-        const title = l.note || l.kind || "포인트 변동";
+        const title = l.note || pointKindLabel(l.kind, "") || "포인트 변동";
+        const source = pointSourceLabel(l.source, "");
 
         return (
             <View
@@ -488,9 +488,11 @@ export default function PointsScreen() {
                             {fmtNumber(l.points)}점
                         </Text>
                         {(l.balanceAfter ?? null) !== null ? (
-                            <Text style={{ fontSize: 12, color: "#6B7280" }}>잔액 {fmtNumber(Number(l.balanceAfter))}P</Text>
+                            <Text style={{ fontSize: 12, color: "#6B7280" }}>
+                                {source ? `${source} · ` : ""}잔액 {fmtNumber(Number(l.balanceAfter))}P
+                            </Text>
                         ) : (
-                            <Text style={{ fontSize: 12, color: "#6B7280" }} />
+                            <Text style={{ fontSize: 12, color: "#6B7280" }}>{source}</Text>
                         )}
                     </View>
                 </View>

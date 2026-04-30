@@ -17,7 +17,7 @@ import { api } from "../../src/api/client";
 import { fetchRecommendQuota, watchAdQuota, RecommendQuota } from "../../src/api/points";
 import { fetchProofQuota, ProofQuota } from "../../src/api/proofQuota";
 import { API_BASE_URL } from "../../src/config";
-import { cuisineLabel, dishTypeLabel } from "../../src/labels/menuLabels";
+import { cuisineLabel, dishTypeLabel } from "@menu-reward/shared";
 
 type RecommendOk = {
     ok: true;

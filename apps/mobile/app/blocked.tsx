@@ -12,7 +12,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { useRouter } from "expo-router";
 import { useFocusEffect } from "@react-navigation/native";
 import { api } from "../src/api/client";
-import { cuisineLabel, dishTypeLabel } from "../src/labels/menuLabels";
+import { cuisineLabel, dishTypeLabel } from "@menu-reward/shared";
 
 type BlockRow = {
     id: string;

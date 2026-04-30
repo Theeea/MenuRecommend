@@ -11,6 +11,14 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MenuDraftService } from './menu-draft.service';
+import {
+  CUISINE_LABELS,
+  DISH_TYPE_LABELS,
+  INGREDIENT_ROLE_LABELS,
+  MENU_DRAFT_STATUS_LABELS,
+  PROOF_RESULT_LABELS,
+  REMOVABLE_LABELS,
+} from '@menu-reward/shared';
 
 // -------------------- auth --------------------
 function assertAdminKey(headerKey?: string) {
@@ -377,6 +385,7 @@ export class AdminController {
   }, { passive: false });
 
   const API_BASE = "";
+  const PROOF_RESULT_LABELS = ${JSON.stringify(PROOF_RESULT_LABELS)};
   const state = { bucket:"need", page:1 };
 
   function getKey(){ return localStorage.getItem("adminKey") || ""; }
@@ -470,6 +479,11 @@ export class AdminController {
     return String(s||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
   }
 
+  function label(map, value, fallback){
+    if(!value) return fallback || "";
+    return map[value] || value;
+  }
+
   function buildQuery(){
     const q = document.getElementById("q").value.trim();
     const from = document.getElementById("from").value;
@@ -508,8 +522,8 @@ export class AdminController {
     const el = document.getElementById("stats");
     el.innerHTML = \`
       <div class="stat">Need: \${s.need}</div>
-      <div class="stat">PASS: \${s.pass}</div>
-      <div class="stat">FAIL: \${s.fail}</div>
+      <div class="stat">\${label(PROOF_RESULT_LABELS, "PASS", "PASS")}: \${s.pass}</div>
+      <div class="stat">\${label(PROOF_RESULT_LABELS, "FAIL", "FAIL")}: \${s.fail}</div>
       <div class="stat">ALL: \${s.all}</div>
       <div class="stat">QR: \${s.holdReasons ? s.holdReasons.QR : 0}</div>
       <div class="stat">FILE: \${s.holdReasons ? s.holdReasons.FILE : 0}</div>
@@ -536,7 +550,7 @@ export class AdminController {
           <div><img src="\${it.imageUrl}" alt="proof" onclick="openImg('\${it.imageUrl}'); event.stopPropagation();" /></div>
           <div class="meta">
             <div class="row">
-              <span class="pill \${pillClass(it.aiResult)}">\${it.aiResult}</span>
+              <span class="pill \${pillClass(it.aiResult)}">\${label(PROOF_RESULT_LABELS, it.aiResult, it.aiResult)}</span>
               \${processingPill(it)}
               \${reasonPill(it)}
               <span class="pill">proofId: \${it.id}</span>
@@ -1062,6 +1076,12 @@ export class AdminController {
 </main>
 
 <script>
+  const CUISINE_LABELS = ${JSON.stringify(CUISINE_LABELS)};
+  const DISH_TYPE_LABELS = ${JSON.stringify(DISH_TYPE_LABELS)};
+  const MENU_DRAFT_STATUS_LABELS = ${JSON.stringify(MENU_DRAFT_STATUS_LABELS)};
+  const INGREDIENT_ROLE_LABELS = ${JSON.stringify(INGREDIENT_ROLE_LABELS)};
+  const REMOVABLE_LABELS = ${JSON.stringify(REMOVABLE_LABELS)};
+
   function getKey(){ return (localStorage.getItem("ADMIN_REVIEW_KEY") || "").trim(); }
   function setKey(k){ localStorage.setItem("ADMIN_REVIEW_KEY", (k||"").trim()); }
   function clearKey(){ localStorage.removeItem("ADMIN_REVIEW_KEY"); }
@@ -1071,6 +1091,11 @@ export class AdminController {
 
   function escapeHtml(s){
     return String(s||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+  }
+
+  function label(map, value, fallback){
+    if(!value) return fallback || "";
+    return map[value] || value;
   }
 
   function showKeyModal(msg){
@@ -1231,10 +1256,10 @@ export class AdminController {
     if(!Array.isArray(items)) return "";
     return items.map((x) => {
       const name = escapeHtml(x && x.name ? x.name : "-");
-      const role = escapeHtml(x && x.role ? x.role : "SUB");
-      const removable = escapeHtml(x && x.removable ? x.removable : "UNKNOWN");
+      const role = x && x.role ? x.role : "SUB";
+      const removable = x && x.removable ? x.removable : "UNKNOWN";
       const weight = escapeHtml(x && x.weight ? x.weight : 1);
-      return '<span class="pill '+role+'">'+name+' / '+role+' / '+removable+' / w'+weight+'</span>';
+      return '<span class="pill '+escapeHtml(role)+'">'+name+' / '+escapeHtml(label(INGREDIENT_ROLE_LABELS, role, role))+' / '+escapeHtml(label(REMOVABLE_LABELS, removable, removable))+' / w'+weight+'</span>';
     }).join("");
   }
 
@@ -1258,9 +1283,9 @@ export class AdminController {
       const idAttr = escapeHtml(it.id || "");
       return '<div class="card">' +
         '<div class="row">' +
-          '<span class="pill '+escapeHtml(it.status)+'">'+escapeHtml(it.status)+'</span>' +
-          '<span class="pill">'+escapeHtml(it.cuisine)+'</span>' +
-          '<span class="pill">'+escapeHtml(it.dishType || "OTHER")+'</span>' +
+          '<span class="pill '+escapeHtml(it.status)+'">'+escapeHtml(label(MENU_DRAFT_STATUS_LABELS, it.status, it.status))+'</span>' +
+          '<span class="pill">'+escapeHtml(label(CUISINE_LABELS, it.cuisine, it.cuisine))+'</span>' +
+          '<span class="pill">'+escapeHtml(label(DISH_TYPE_LABELS, it.dishType || "OTHER", "기타"))+'</span>' +
         '</div>' +
         '<div class="title">'+escapeHtml(it.name)+'</div>' +
         '<div class="muted">normalized: '+escapeHtml(it.normalizedName)+'</div>' +
