@@ -1,5 +1,7 @@
 import {
+  BadGatewayException,
   BadRequestException,
+  HttpException,
   Injectable,
   NotFoundException,
   UnauthorizedException,
@@ -96,6 +98,24 @@ function stringFrom(value: unknown) {
     : '';
 }
 
+function errorMessage(error: unknown) {
+  if (error instanceof Error) return error.message;
+  if (isRecord(error) && typeof error.message === 'string') {
+    return error.message;
+  }
+  return String(error);
+}
+
+function errorCode(error: unknown) {
+  return isRecord(error) && typeof error.code === 'string' ? error.code : '';
+}
+
+function errorStatus(error: unknown) {
+  return isRecord(error) && typeof error.status === 'number'
+    ? error.status
+    : undefined;
+}
+
 @Injectable()
 export class MenuDraftService {
   private readonly openai = new OpenAI({
@@ -121,11 +141,13 @@ export class MenuDraftService {
     if (status && status !== 'ALL') where.status = status;
     if (cuisine) where.cuisine = cuisine;
 
-    const items = await this.prisma.menuDraft.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take,
-    });
+    const items = await this.catchKnownError(() =>
+      this.prisma.menuDraft.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        take,
+      }),
+    );
 
     return { ok: true, items };
   }
@@ -142,69 +164,74 @@ export class MenuDraftService {
     const cuisine = parseCuisine(body.cuisine);
     const count = clampCount(body.count);
 
-    const existing = await this.getExistingMenuKeys(cuisine);
-    const existingNames = [...existing.namesByCuisine.entries()]
-      .flatMap(([c, names]) => [...names].map((name) => `${c}:${name}`))
-      .slice(0, 500);
+    return this.catchKnownError(async () => {
+      const existing = await this.getExistingMenuKeys(cuisine);
+      const existingNames = [...existing.namesByCuisine.entries()]
+        .flatMap(([c, names]) => [...names].map((name) => `${c}:${name}`))
+        .slice(0, 500);
 
-    const candidates = await this.generateWithAi({
-      cuisine,
-      count,
-      existingNames,
-      memo: body.memo,
-    });
-
-    const saved: Awaited<ReturnType<PrismaService['menuDraft']['create']>>[] =
-      [];
-    const skipped: Array<{ name: string; cuisine?: Cuisine; reason: string }> =
-      [];
-    const seenInResponse = new Set<string>();
-
-    for (const candidate of candidates) {
-      const normalized = normalizeMenuName(candidate.name);
-      const key = `${candidate.cuisine}:${normalized}`;
-
-      if (!normalized || seenInResponse.has(key)) {
-        skipped.push({
-          name: candidate.name,
-          reason: 'DUPLICATE_IN_AI_RESPONSE',
-        });
-        continue;
-      }
-      seenInResponse.add(key);
-
-      if (existing.keys.has(key)) {
-        skipped.push({
-          name: candidate.name,
-          cuisine: candidate.cuisine,
-          reason: 'DUPLICATE_EXISTING_DB_OR_DRAFT',
-        });
-        continue;
-      }
-
-      const draft = await this.prisma.menuDraft.create({
-        data: {
-          name: candidate.name,
-          normalizedName: normalized,
-          cuisine: candidate.cuisine,
-          dishType: candidate.dishType,
-          ingredients: candidate.ingredients as Prisma.InputJsonValue,
-          description: candidate.description,
-          tags: candidate.tags as Prisma.InputJsonValue,
-          source: 'AI',
-          status: 'PENDING',
-          aiMeta: {
-            model: this.model(),
-            rule: 'existing Menu and MenuDraft names are excluded by normalized name + cuisine',
-            requestedCuisine: cuisine ?? null,
-          },
-        },
+      const candidates = await this.generateWithAi({
+        cuisine,
+        count,
+        existingNames,
+        memo: body.memo,
       });
-      existing.keys.add(key);
-      saved.push(draft);
-    }
 
-    return { ok: true, savedCount: saved.length, skipped, items: saved };
+      const saved: Awaited<ReturnType<PrismaService['menuDraft']['create']>>[] =
+        [];
+      const skipped: Array<{
+        name: string;
+        cuisine?: Cuisine;
+        reason: string;
+      }> = [];
+      const seenInResponse = new Set<string>();
+
+      for (const candidate of candidates) {
+        const normalized = normalizeMenuName(candidate.name);
+        const key = `${candidate.cuisine}:${normalized}`;
+
+        if (!normalized || seenInResponse.has(key)) {
+          skipped.push({
+            name: candidate.name,
+            reason: 'DUPLICATE_IN_AI_RESPONSE',
+          });
+          continue;
+        }
+        seenInResponse.add(key);
+
+        if (existing.keys.has(key)) {
+          skipped.push({
+            name: candidate.name,
+            cuisine: candidate.cuisine,
+            reason: 'DUPLICATE_EXISTING_DB_OR_DRAFT',
+          });
+          continue;
+        }
+
+        const draft = await this.prisma.menuDraft.create({
+          data: {
+            name: candidate.name,
+            normalizedName: normalized,
+            cuisine: candidate.cuisine,
+            dishType: candidate.dishType,
+            ingredients: candidate.ingredients as Prisma.InputJsonValue,
+            description: candidate.description,
+            tags: candidate.tags as Prisma.InputJsonValue,
+            source: 'AI',
+            status: 'PENDING',
+            aiMeta: {
+              model: this.model(),
+              rule: 'existing Menu and MenuDraft names are excluded by normalized name + cuisine',
+              requestedCuisine: cuisine ?? null,
+            },
+          },
+        });
+        existing.keys.add(key);
+        saved.push(draft);
+      }
+
+      return { ok: true, savedCount: saved.length, skipped, items: saved };
+    });
   }
 
   async approve(adminKey: string | undefined, id: string) {
@@ -531,6 +558,44 @@ ${String(args.memo ?? '').trim() || '(없음)'}
       process.env.OPENAI_VISION_MODEL ||
       'gpt-4.1-mini'
     );
+  }
+
+  private async catchKnownError<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
+
+      const code = errorCode(error);
+      const message = errorMessage(error);
+      const status = errorStatus(error);
+
+      if (code === 'P2021' || code === 'P2022') {
+        throw new BadRequestException({
+          code: 'MENU_DRAFT_MIGRATION_REQUIRED',
+          message:
+            'MenuDraft 테이블 또는 컬럼이 없습니다. API DB에 마이그레이션을 먼저 적용해 주세요.',
+          command: 'pnpm --filter api prisma:deploy',
+          detail: message,
+        });
+      }
+
+      if (
+        status ||
+        code.startsWith('invalid_') ||
+        code === 'rate_limit_exceeded'
+      ) {
+        throw new BadGatewayException({
+          code: 'OPENAI_MENU_GENERATE_FAILED',
+          message: 'OpenAI 메뉴 후보 생성 요청이 실패했습니다.',
+          openaiStatus: status ?? null,
+          openaiCode: code || null,
+          detail: message,
+        });
+      }
+
+      throw error;
+    }
   }
 
   private assertAdminKey(headerKey?: string) {
