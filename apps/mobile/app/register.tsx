@@ -1,26 +1,36 @@
 import React, { useState } from "react";
-import { View, Text, TextInput, Pressable, Alert } from "react-native";
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import * as Haptics from "expo-haptics";
+import { Ionicons } from "@expo/vector-icons";
 import { api } from "../src/api/client";
 import { useAuth } from "../src/auth/authStore";
-import { Link } from "expo-router";
+import { Link, useRouter } from "expo-router";
 
 export default function RegisterScreen() {
+    const router = useRouter();
     const { signIn } = useAuth();
     const [email, setEmail] = useState("");
     const [password, setPassword] = useState("");
     const [loading, setLoading] = useState(false);
+    const canSubmit = email.trim().length > 0 && password.length >= 4 && !loading;
 
     const onRegister = async () => {
+        if (!canSubmit) {
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            Alert.alert("입력 확인", "이메일과 4자 이상 비밀번호를 입력해줘.");
+            return;
+        }
+
         try {
             setLoading(true);
-            Haptics.selectionAsync();
-            const res = await api.post("/auth/register", { email, password });
+            await Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            const res = await api.post("/auth/register", { email: email.trim(), password });
             await signIn(res.data.accessToken);
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            router.replace("/(tabs)");
         } catch (e: any) {
-            Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             Alert.alert("회원가입 실패", e?.response?.data?.message ?? "다시 시도해줘.");
         } finally {
             setLoading(false);
@@ -28,74 +38,134 @@ export default function RegisterScreen() {
     };
 
     return (
-        <SafeAreaView style={{ flex: 1, backgroundColor: "#F0F9FF" }} edges={["top", "left", "right"]}>
-            <View style={{ flex: 1, padding: 20, gap: 14 }}>
-                <View style={{ marginTop: 10, gap: 6 }}>
-                    <Text style={{ fontSize: 28, fontWeight: "800", color: "#111" }}>회원가입</Text>
-                    <Text style={{ color: "#444", lineHeight: 20 }}>
-                        계정 만들고 포인트 적립 시작!
-                    </Text>
-                </View>
-
-                <View style={{ marginTop: 18, backgroundColor: "#fff", borderRadius: 18, padding: 16, gap: 12 }}>
-                    <View>
-                        <Text style={{ fontSize: 13, color: "#666", marginBottom: 6 }}>이메일</Text>
-                        <TextInput
-                            value={email}
-                            onChangeText={setEmail}
-                            autoCapitalize="none"
-                            keyboardType="email-address"
-                            placeholder="test@example.com"
-                            style={{
-                                height: 46,
-                                paddingHorizontal: 12,
-                                borderRadius: 12,
-                                backgroundColor: "#F6F6F6",
-                            }}
-                        />
-                    </View>
-
-                    <View>
-                        <Text style={{ fontSize: 13, color: "#666", marginBottom: 6 }}>비밀번호</Text>
-                        <TextInput
-                            value={password}
-                            onChangeText={setPassword}
-                            secureTextEntry
-                            placeholder="••••"
-                            style={{
-                                height: 46,
-                                paddingHorizontal: 12,
-                                borderRadius: 12,
-                                backgroundColor: "#F6F6F6",
-                            }}
-                        />
-                    </View>
-
-                    <Pressable
-                        onPress={onRegister}
-                        disabled={loading || !email || password.length < 4}
+        <SafeAreaView style={{ flex: 1, backgroundColor: "#FFF6EE" }} edges={["top", "left", "right"]}>
+            <ScrollView
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={{ flexGrow: 1, padding: 18, justifyContent: "center" }}
+            >
+                <View style={{ gap: 14 }}>
+                    <View
                         style={{
-                            height: 52,
-                            borderRadius: 14,
+                            width: 54,
+                            height: 54,
+                            borderRadius: 18,
+                            backgroundColor: "#111",
                             alignItems: "center",
                             justifyContent: "center",
-                            backgroundColor: "#111",
-                            opacity: loading || !email || password.length < 4 ? 0.5 : 1,
-                            marginTop: 6,
                         }}
                     >
-                        <Text style={{ color: "white", fontWeight: "800", fontSize: 16 }}>
-                            {loading ? "생성 중..." : "계정 만들기"}
-                        </Text>
-                    </Pressable>
+                        <Ionicons name="sparkles" size={24} color="#fff" />
+                    </View>
 
-                    <Link href="/login" asChild>
-                        <Pressable style={{ alignItems: "center", paddingVertical: 10 }}>
-                            <Text style={{ color: "#333", fontWeight: "700" }}>로그인으로</Text>
+                    <View style={{ gap: 6 }}>
+                        <Text style={{ fontSize: 30, fontWeight: "900", color: "#111" }}>Menu Reward</Text>
+                        <Text style={{ color: "#555", lineHeight: 20, fontWeight: "700" }}>
+                            메뉴 추천받고 음식 인증으로 포인트를 모아보세요.
+                        </Text>
+                    </View>
+
+                    <View
+                        style={{
+                            marginTop: 8,
+                            backgroundColor: "#fff",
+                            borderRadius: 20,
+                            padding: 16,
+                            gap: 13,
+                            shadowColor: "#000",
+                            shadowOpacity: 0.06,
+                            shadowRadius: 10,
+                            shadowOffset: { width: 0, height: 4 },
+                        }}
+                    >
+                        <View>
+                            <Text style={{ fontSize: 13, color: "#666", marginBottom: 7, fontWeight: "800" }}>이메일</Text>
+                            <View
+                                style={{
+                                    height: 50,
+                                    paddingHorizontal: 12,
+                                    borderRadius: 14,
+                                    backgroundColor: "#F7F7F7",
+                                    flexDirection: "row",
+                                    alignItems: "center",
+                                    gap: 9,
+                                    borderWidth: 1,
+                                    borderColor: "#EFEFEF",
+                                }}
+                            >
+                                <Ionicons name="mail-outline" size={18} color="#777" />
+                                <TextInput
+                                    value={email}
+                                    onChangeText={setEmail}
+                                    autoCapitalize="none"
+                                    autoCorrect={false}
+                                    keyboardType="email-address"
+                                    placeholder="test@example.com"
+                                    style={{ flex: 1, fontWeight: "700", color: "#111" }}
+                                />
+                            </View>
+                        </View>
+
+                        <View>
+                            <Text style={{ fontSize: 13, color: "#666", marginBottom: 7, fontWeight: "800" }}>비밀번호</Text>
+                            <View
+                                style={{
+                                    height: 50,
+                                    paddingHorizontal: 12,
+                                    borderRadius: 14,
+                                    backgroundColor: "#F7F7F7",
+                                    flexDirection: "row",
+                                    alignItems: "center",
+                                    gap: 9,
+                                    borderWidth: 1,
+                                    borderColor: "#EFEFEF",
+                                }}
+                            >
+                                <Ionicons name="lock-closed-outline" size={18} color="#777" />
+                                <TextInput
+                                    value={password}
+                                    onChangeText={setPassword}
+                                    secureTextEntry
+                                    placeholder="4자 이상"
+                                    style={{ flex: 1, fontWeight: "700", color: "#111" }}
+                                />
+                            </View>
+                        </View>
+
+                        <Pressable
+                            onPress={onRegister}
+                            disabled={!canSubmit}
+                            style={{
+                                height: 54,
+                                borderRadius: 15,
+                                alignItems: "center",
+                                justifyContent: "center",
+                                backgroundColor: canSubmit ? "#FF4D2D" : "#E0E0E0",
+                                marginTop: 4,
+                                flexDirection: "row",
+                                gap: 8,
+                            }}
+                        >
+                            {loading ? (
+                                <ActivityIndicator color="#fff" />
+                            ) : (
+                                <>
+                                    <Ionicons name="person-add-outline" size={18} color="#fff" />
+                                    <Text style={{ color: "white", fontWeight: "900", fontSize: 16 }}>계정 만들기</Text>
+                                </>
+                            )}
                         </Pressable>
-                    </Link>
+
+                        <Link href="/login" asChild>
+                            <Pressable
+                                onPress={() => Haptics.selectionAsync()}
+                                style={{ alignItems: "center", paddingVertical: 10 }}
+                            >
+                                <Text style={{ color: "#333", fontWeight: "800" }}>이미 계정이 있어요</Text>
+                            </Pressable>
+                        </Link>
+                    </View>
                 </View>
-            </View>
+            </ScrollView>
         </SafeAreaView>
     );
 }

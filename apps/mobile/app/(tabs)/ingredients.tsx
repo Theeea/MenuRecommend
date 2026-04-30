@@ -11,6 +11,8 @@ import {
 } from "react-native";
 import { useFocusEffect } from "@react-navigation/native";
 import { useRouter } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 
 import { useAuth } from "../../src/auth/authStore";
 import { useIngredientsStore } from "../../src/ingredients/ingredientsStore";
@@ -65,6 +67,7 @@ export default function IngredientsScreen() {
 
     const onSave = async () => {
         if (!token) {
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
             toast("로그인이 필요합니다.");
             return;
         }
@@ -72,21 +75,37 @@ export default function IngredientsScreen() {
         setSaving(true);
         try {
             await saveUserIngredients(token, selectedIds);
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
             toast("저장되었습니다.");
         } catch (e: any) {
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
             toast(e?.message || "저장 실패");
         } finally {
             setSaving(false);
         }
     };
 
-    // 디버그(원인확정): 0이면 API/파싱 문제, 0이 아니면 렌더/필터 문제
-    console.log("[ingredients] ingredients len =", ingredients?.length);
-    console.log("[ingredients] selected len =", selectedIds?.length);
-
     return (
-        <View style={{ flex: 1, backgroundColor: "#fff", padding: 16 }}>
-            <View style={{ flexDirection: "row", gap: 8 }}>
+        <View style={{ flex: 1, backgroundColor: "#FFF6EE", padding: 16 }}>
+            <View
+                style={{
+                    backgroundColor: "#FFFFFF",
+                    borderRadius: 18,
+                    padding: 16,
+                    shadowColor: "#000",
+                    shadowOpacity: 0.06,
+                    shadowRadius: 10,
+                    shadowOffset: { width: 0, height: 4 },
+                }}
+            >
+                <Text style={{ fontSize: 18, fontWeight: "900", color: "#111" }}>싫어하는 재료</Text>
+                <Text style={{ marginTop: 6, color: "#666", fontWeight: "700", lineHeight: 19 }}>
+                    MAIN 재료로 들어간 메뉴는 추천에서 제외돼요.
+                </Text>
+
+                <View style={{ height: 14 }} />
+
+                <View style={{ flexDirection: "row", gap: 8 }}>
                 <Pressable
                     onPress={onSave}
                     disabled={saving}
@@ -96,40 +115,58 @@ export default function IngredientsScreen() {
                         borderRadius: 12,
                         backgroundColor: saving ? "#ffb3a6" : "#FF4D2D",
                         alignItems: "center",
+                        flexDirection: "row",
+                        justifyContent: "center",
+                        gap: 7,
                     }}
                 >
+                    <Ionicons name="save-outline" size={17} color="#fff" />
                     <Text style={{ color: "#fff", fontWeight: "700" }}>
                         {saving ? "저장중..." : "저장"}
                     </Text>
                 </Pressable>
 
                 <Pressable
-                    onPress={reset}
+                    onPress={async () => {
+                        await Haptics.selectionAsync();
+                        reset();
+                    }}
                     style={{
                         paddingVertical: 12,
                         paddingHorizontal: 14,
                         borderRadius: 12,
                         backgroundColor: "#F2F4F7",
                         alignItems: "center",
+                        flexDirection: "row",
+                        gap: 7,
                     }}
                 >
+                    <Ionicons name="refresh-outline" size={17} color="#111" />
                     <Text style={{ color: "#111", fontWeight: "700" }}>초기화</Text>
                 </Pressable>
-            </View>
+                </View>
 
-            {/* ✅ 차단 메뉴 관리 */}
-            <View style={{ height: 10 }} />
-            <Pressable
-                onPress={() => router.push("/blocked")}
-                style={{
-                    paddingVertical: 12,
-                    borderRadius: 12,
-                    backgroundColor: "#111",
-                    alignItems: "center",
-                }}
-            >
-                <Text style={{ color: "#fff", fontWeight: "800" }}>차단 메뉴 관리</Text>
-            </Pressable>
+                {/* ✅ 차단 메뉴 관리 */}
+                <View style={{ height: 10 }} />
+                <Pressable
+                    onPress={async () => {
+                        await Haptics.selectionAsync();
+                        router.push("/blocked");
+                    }}
+                    style={{
+                        paddingVertical: 12,
+                        borderRadius: 12,
+                        backgroundColor: "#111",
+                        alignItems: "center",
+                        flexDirection: "row",
+                        justifyContent: "center",
+                        gap: 8,
+                    }}
+                >
+                    <Ionicons name="ban-outline" size={17} color="#fff" />
+                    <Text style={{ color: "#fff", fontWeight: "800" }}>차단 메뉴 관리</Text>
+                </Pressable>
+            </View>
 
             <View style={{ height: 12 }} />
 
@@ -148,21 +185,31 @@ export default function IngredientsScreen() {
                         const selected = selectedIds.includes(String(item.id));
                         return (
                             <Pressable
-                                onPress={() => toggle(String(item.id))}
+                                onPress={async () => {
+                                    await Haptics.selectionAsync();
+                                    toggle(String(item.id));
+                                }}
                                 style={{
                                     paddingVertical: 14,
                                     paddingHorizontal: 12,
-                                    borderRadius: 12,
+                                    borderRadius: 14,
                                     marginBottom: 10,
-                                    backgroundColor: selected ? "#FFF1EE" : "#FAFAFA",
+                                    backgroundColor: selected ? "#FFF1EE" : "#FFFFFF",
                                     borderWidth: 1,
                                     borderColor: selected ? "#FF4D2D" : "#EEE",
+                                    flexDirection: "row",
+                                    alignItems: "center",
+                                    justifyContent: "space-between",
                                 }}
                             >
-                                <Text style={{ fontSize: 16, fontWeight: selected ? "700" : "500" }}>
-                                    {selected ? "✅ " : "⬜️ "}
+                                <Text style={{ fontSize: 16, fontWeight: selected ? "800" : "700", color: "#111" }}>
                                     {item.name}
                                 </Text>
+                                <Ionicons
+                                    name={selected ? "checkmark-circle" : "ellipse-outline"}
+                                    size={22}
+                                    color={selected ? "#FF4D2D" : "#C9CDD2"}
+                                />
                             </Pressable>
                         );
                     }}

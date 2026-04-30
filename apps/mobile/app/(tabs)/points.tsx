@@ -12,6 +12,8 @@ import {
     View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons } from "@expo/vector-icons";
+import * as Haptics from "expo-haptics";
 import { useAuth } from "../../src/auth/authStore";
 
 type LedgerItem = {
@@ -49,6 +51,9 @@ type TimelineItem =
     | { type: "ledger"; createdAt: string; ledger: LedgerItem };
 
 const API_BASE = (process.env.EXPO_PUBLIC_API_BASE_URL ?? "").replace(/\/$/, "");
+const SCREEN_BG = "#FFF6EE";
+const CARD_BG = "#FFFFFF";
+const INK = "#111827";
 
 function fmtNumber(n: number) {
     return (Number(n) || 0).toLocaleString("ko-KR");
@@ -232,7 +237,8 @@ export default function PointsScreen() {
 
     const canCallApi = useMemo(() => Boolean(API_BASE && tokenRaw), [tokenRaw]);
 
-    const scrollToTab = (next: 0 | 1) => {
+    const scrollToTab = async (next: 0 | 1) => {
+        await Haptics.selectionAsync();
         setTab(next);
         pagerRef.current?.scrollTo({ x: width * next, animated: true });
     };
@@ -305,8 +311,9 @@ export default function PointsScreen() {
         setError("세션이 만료되었거나 토큰이 유효하지 않아요. 로그아웃 후 다시 로그인해 주세요.");
     };
 
-    const refreshAll = async () => {
+    const refreshAll = async (withHaptic = false) => {
         if (!canCallApi) return;
+        if (withHaptic) await Haptics.selectionAsync();
         setRefreshing(true);
         setError(null);
         try {
@@ -355,7 +362,7 @@ export default function PointsScreen() {
     useEffect(() => {
         if (!canCallApi) return;
         setLoading(true);
-        refreshAll().finally(() => setLoading(false));
+        refreshAll(false).finally(() => setLoading(false));
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [canCallApi]);
 
@@ -376,6 +383,7 @@ export default function PointsScreen() {
         const sub = proofPointsText(p);
         if (!uri) return;
 
+        Haptics.selectionAsync().catch(() => {});
         setImgModal({ visible: true, uri, title, sub });
     };
 
@@ -458,7 +466,7 @@ export default function PointsScreen() {
                         width: 48,
                         height: 48,
                         borderRadius: 12,
-                        backgroundColor: "#111827",
+                        backgroundColor: INK,
                         alignItems: "center",
                         justifyContent: "center",
                     }}
@@ -509,7 +517,7 @@ export default function PointsScreen() {
     }
 
     return (
-        <View style={{ flex: 1, paddingTop: insets.top }}>
+        <View style={{ flex: 1, paddingTop: insets.top, backgroundColor: SCREEN_BG }}>
             {/* ✅ 이미지 크게보기 모달 */}
             <Modal
                 visible={imgModal.visible}
@@ -519,7 +527,10 @@ export default function PointsScreen() {
             >
                 <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.92)" }}>
                     <Pressable
-                        onPress={() => setImgModal((p) => ({ ...p, visible: false }))}
+                        onPress={async () => {
+                            await Haptics.selectionAsync();
+                            setImgModal((p) => ({ ...p, visible: false }));
+                        }}
                         style={{ position: "absolute", top: insets.top + 10, right: 14, zIndex: 2, padding: 10 }}
                     >
                         <Text style={{ color: "#fff", fontSize: 18, fontWeight: "900" }}>✕</Text>
@@ -552,8 +563,35 @@ export default function PointsScreen() {
 
             {/* 상단 잔액 */}
             <View style={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12 }}>
-                <Text style={{ fontSize: 12, color: "#6B7280" }}>보유 포인트</Text>
-                <Text style={{ fontSize: 28, fontWeight: "800", marginTop: 4 }}>{fmtNumber(balance)}P</Text>
+                <View
+                    style={{
+                        backgroundColor: CARD_BG,
+                        borderRadius: 18,
+                        padding: 16,
+                        shadowColor: "#000",
+                        shadowOpacity: 0.06,
+                        shadowRadius: 10,
+                        shadowOffset: { width: 0, height: 4 },
+                    }}
+                >
+                    <View style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between" }}>
+                        <View>
+                            <Text style={{ fontSize: 12, color: "#6B7280", fontWeight: "800" }}>보유 포인트</Text>
+                            <Text style={{ fontSize: 30, fontWeight: "900", marginTop: 4, color: "#111" }}>{fmtNumber(balance)}P</Text>
+                        </View>
+                        <View
+                            style={{
+                                width: 46,
+                                height: 46,
+                                borderRadius: 16,
+                                backgroundColor: "#111",
+                                alignItems: "center",
+                                justifyContent: "center",
+                            }}
+                        >
+                            <Ionicons name="wallet" size={22} color="#fff" />
+                        </View>
+                    </View>
 
                 {__DEV__ && !!usedUrl && (
                     <Text style={{ marginTop: 6, fontSize: 11, color: "#9CA3AF" }}>Used URL: {usedUrl}</Text>
@@ -575,7 +613,7 @@ export default function PointsScreen() {
 
                         <View style={{ flexDirection: "row", gap: 10, marginTop: 10 }}>
                             <Pressable
-                                onPress={refreshAll}
+                                onPress={() => refreshAll(true)}
                                 style={{ paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: "#111827" }}
                             >
                                 <Text style={{ color: "#fff", fontWeight: "700", fontSize: 12 }}>다시 시도</Text>
@@ -592,20 +630,21 @@ export default function PointsScreen() {
                         </View>
                     </View>
                 )}
+                </View>
             </View>
 
             {/* 탭 */}
             <View style={{ flexDirection: "row", paddingHorizontal: 16, gap: 10, paddingBottom: 10 }}>
                 <Pressable
                     onPress={() => scrollToTab(0)}
-                    style={{ flex: 1, paddingVertical: 10, borderRadius: 12, backgroundColor: tab === 0 ? "#111827" : "#F3F4F6" }}
+                    style={{ flex: 1, paddingVertical: 11, borderRadius: 999, backgroundColor: tab === 0 ? INK : CARD_BG }}
                 >
                     <Text style={{ textAlign: "center", color: tab === 0 ? "#FFFFFF" : "#111827", fontWeight: "700" }}>사용</Text>
                 </Pressable>
 
                 <Pressable
                     onPress={() => scrollToTab(1)}
-                    style={{ flex: 1, paddingVertical: 10, borderRadius: 12, backgroundColor: tab === 1 ? "#111827" : "#F3F4F6" }}
+                    style={{ flex: 1, paddingVertical: 11, borderRadius: 999, backgroundColor: tab === 1 ? INK : CARD_BG }}
                 >
                     <Text style={{ textAlign: "center", color: tab === 1 ? "#FFFFFF" : "#111827", fontWeight: "700" }}>내역</Text>
                 </Pressable>
@@ -624,11 +663,27 @@ export default function PointsScreen() {
             >
                 {/* 사용 */}
                 <View style={{ width, flex: 1, paddingHorizontal: 16 }}>
-                    <View style={{ backgroundColor: "#F9FAFB", borderRadius: 16, padding: 14, borderWidth: 1, borderColor: "#EFEFEF" }}>
-                        <Text style={{ fontSize: 15, fontWeight: "800" }}>포인트 사용 (준비중)</Text>
-                        <Text style={{ marginTop: 8, color: "#6B7280", lineHeight: 18 }}>
-                            추후 포인트로 기프티콘/아이템을 구매할 수 있도록 만들 예정이에요.
-                        </Text>
+                    <View style={{ backgroundColor: CARD_BG, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: "#F1E8E0" }}>
+                        <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+                            <View
+                                style={{
+                                    width: 38,
+                                    height: 38,
+                                    borderRadius: 14,
+                                    backgroundColor: "#FFF1EE",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                }}
+                            >
+                                <Ionicons name="gift-outline" size={20} color="#FF4D2D" />
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={{ fontSize: 15, fontWeight: "900", color: "#111" }}>포인트 사용 준비중</Text>
+                                <Text style={{ marginTop: 4, color: "#6B7280", lineHeight: 18 }}>
+                                    기프티콘과 아이템 구매 기능을 붙일 예정이에요.
+                                </Text>
+                            </View>
+                        </View>
                     </View>
                     <View style={{ height: 24 }} />
                 </View>
@@ -644,7 +699,7 @@ export default function PointsScreen() {
                             data={timeline}
                             keyExtractor={(it) => (it.type === "proof" ? `proof:${it.proof.id}` : `ledger:${it.ledger.id}`)}
                             renderItem={renderTimelineItem}
-                            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={refreshAll} />}
+                            refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => refreshAll(true)} />}
                             onEndReachedThreshold={0.4}
                             onEndReached={loadMore}
                             ListEmptyComponent={

@@ -21,6 +21,10 @@ type AiDecision = {
   confidence: number; // 0~1
   detected: string[];
   reason: string;
+  realPhotoLikely?: boolean;
+  screenOrPrintSuspicion?: boolean;
+  stockOrWebImageSuspicion?: boolean;
+  fraudSignals?: string[];
 };
 
 type QrParsed = {
@@ -33,6 +37,13 @@ type QrParsed = {
 };
 
 function envInt(name: string, fallback: number) {
+  const v = process.env[name];
+  if (v == null || v === '') return fallback;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function envFloat(name: string, fallback: number) {
   const v = process.env[name];
   if (v == null || v === '') return fallback;
   const n = Number(v);
@@ -588,7 +599,7 @@ export class ProofService {
 
     const prompt = `
 너는 음식 인증 심사 AI야.
-사용자가 업로드한 "실제 음식 사진"이 아래 '기대 메뉴'와 일치하는지 판정해줘.
+사용자가 업로드한 이미지가 아래 '기대 메뉴'와 일치하고, 보상 지급에 사용할 수 있는 "직접 촬영한 실제 음식 사진"인지 판정해줘.
 
 [기대 메뉴]
 - 메뉴명: ${args.expected.menuName}
@@ -598,10 +609,14 @@ export class ProofService {
 - ${ing}
 
 판정 규칙:
-- 업로드 이미지가 다른 화면(모바일/PC)에서 띄운 사진(재촬영/스크린샷)처럼 보이면 match=false
-- 음식이 명확히 보이지 않으면 match=false
-- 유사 메뉴는 신중히: 확신 낮으면 match=false 또는 confidence 낮게
-- 사이드/반찬/그릇 차이는 감안
+- match=true는 "메뉴도 일치하고, 직접 촬영한 실제 음식 사진일 가능성이 높다"는 뜻이다.
+- 검색 이미지, 쇼핑몰/배달앱/블로그/광고/스톡 사진처럼 보이면 match=false.
+- 지나치게 전문적인 조명, 완벽한 제품 컷, 투명/흰 배경, 워터마크/로고/텍스트, 웹 이미지 특유의 구도는 stockOrWebImageSuspicion=true.
+- 모바일/PC 화면을 다시 찍은 흔적, 스크린샷, 모니터 픽셀/베젤/반사/모아레가 보이면 screenOrPrintSuspicion=true.
+- 직접 촬영한 식사 사진으로 보기 어렵거나 현장성이 애매하면 realPhotoLikely=false.
+- 음식이 명확히 보이지 않으면 match=false.
+- 유사 메뉴는 신중히: 확신 낮으면 match=false 또는 confidence 낮게.
+- 사이드/반찬/그릇 차이는 감안하되, 검색 이미지 의심은 메뉴가 맞아도 통과시키지 않는다.
 - 결과는 반드시 JSON 스키마에 맞춰 반환
     `.trim();
 
@@ -612,7 +627,7 @@ export class ProofService {
           role: 'user',
           content: [
             { type: 'input_text', text: prompt },
-            { type: 'input_image', image_url: dataUrl, detail: 'low' },
+            { type: 'input_image', image_url: dataUrl, detail: 'high' },
           ],
         },
       ],
@@ -629,8 +644,21 @@ export class ProofService {
               confidence: { type: 'number', minimum: 0, maximum: 1 },
               detected: { type: 'array', items: { type: 'string' } },
               reason: { type: 'string' },
+              realPhotoLikely: { type: 'boolean' },
+              screenOrPrintSuspicion: { type: 'boolean' },
+              stockOrWebImageSuspicion: { type: 'boolean' },
+              fraudSignals: { type: 'array', items: { type: 'string' } },
             },
-            required: ['match', 'confidence', 'detected', 'reason'],
+            required: [
+              'match',
+              'confidence',
+              'detected',
+              'reason',
+              'realPhotoLikely',
+              'screenOrPrintSuspicion',
+              'stockOrWebImageSuspicion',
+              'fraudSignals',
+            ],
           },
         },
       },
@@ -646,6 +674,12 @@ export class ProofService {
       ? parsed.detected.map(String).slice(0, 20)
       : [];
     parsed.reason = String(parsed.reason ?? '');
+    parsed.realPhotoLikely = Boolean(parsed.realPhotoLikely);
+    parsed.screenOrPrintSuspicion = Boolean(parsed.screenOrPrintSuspicion);
+    parsed.stockOrWebImageSuspicion = Boolean(parsed.stockOrWebImageSuspicion);
+    parsed.fraudSignals = Array.isArray(parsed.fraudSignals)
+      ? parsed.fraudSignals.map(String).slice(0, 20)
+      : [];
 
     return parsed;
   }
@@ -658,11 +692,23 @@ export class ProofService {
     // score는 0~100 변환
     const score = Math.round(conf * 100);
 
+    const passConfidence = Math.max(
+      0.75,
+      Math.min(0.99, envFloat('PROOF_PASS_CONFIDENCE', 0.92)),
+    );
+
+    const hasFraudSuspicion =
+      ai.realPhotoLikely === false ||
+      ai.screenOrPrintSuspicion === true ||
+      ai.stockOrWebImageSuspicion === true;
+
     // ✅ 기준은 보수적으로
-    // - match=true & conf>=0.75 => PASS
+    // - match=true & 실제 촬영 가능성 높음 & 부정 의심 없음 & conf>=기본 0.92 => PASS
     // - match=false & conf>=0.80 => FAIL
     // - 그 외 => HOLD(관리자 리뷰)
-    if (ai.match && conf >= 0.75) return { result: 'PASS' as any, score };
+    if (ai.match && !hasFraudSuspicion && conf >= passConfidence) {
+      return { result: 'PASS' as any, score };
+    }
     if (!ai.match && conf >= 0.8) return { result: 'FAIL' as any, score };
     return { result: 'HOLD' as any, score };
   }

@@ -59,21 +59,20 @@ export default function Proof() {
     const currentProof = proofStatus?.proof ?? null;
     const currentAiResult = currentProof?.aiResult ?? null;
 
-    const isBlockedByStatus =
-        currentAiResult === "PENDING" || currentAiResult === "HOLD";
+    const hasSubmittedProof = !!currentProof;
 
     const blockedText = useMemo(() => {
         if (!currentAiResult) return "";
         if (currentAiResult === "PENDING") return "현재 인증이 검토중이라 추가 업로드가 제한돼요.";
         if (currentAiResult === "HOLD") return "현재 인증이 보류(검토) 상태라 추가 업로드가 제한돼요.";
-        if (currentAiResult === "PASS") return "이미 승인된 인증이에요.";
-        if (currentAiResult === "FAIL") return "인증이 거절되었어요. (정책에 따라 재업로드가 제한될 수 있어요)";
+        if (currentAiResult === "PASS") return "이미 승인된 인증이 있어 추가 촬영/업로드가 제한돼요.";
+        if (currentAiResult === "FAIL") return "이미 거절 처리된 인증이 있어 추가 촬영/업로드가 제한돼요.";
         return "";
     }, [currentAiResult]);
 
     const canSubmit = useMemo(() => {
-        return !!localUri && !!sessionId && !uploading && !isBlockedByStatus;
-    }, [localUri, sessionId, uploading, isBlockedByStatus]);
+        return !!localUri && !!sessionId && !uploading && !hasSubmittedProof;
+    }, [localUri, sessionId, uploading, hasSubmittedProof]);
 
     const refreshProofStatus = useCallback(async (): Promise<ProofStatusResponse | null> => {
         if (!sessionId) return null;
@@ -96,26 +95,6 @@ export default function Proof() {
         refreshProofStatus();
     }, [sessionId, refreshProofStatus]);
 
-    const takePhoto = useCallback(async () => {
-        const perm = await ImagePicker.requestCameraPermissionsAsync();
-        if (!perm.granted) {
-            Alert.alert("권한 필요", "카메라 권한을 허용해줘.");
-            return;
-        }
-
-        await Haptics.selectionAsync();
-        const res = await ImagePicker.launchCameraAsync({
-            allowsEditing: true,
-            quality: 0.8,
-        });
-
-        if (res.canceled) return;
-        const uri = res.assets?.[0]?.uri;
-        if (!uri) return;
-
-        setLocalUri(uri);
-    }, []);
-
     const showBlockedAlert = useCallback(() => {
         const label =
             currentAiResult === "PENDING"
@@ -133,6 +112,31 @@ export default function Proof() {
             ]
         );
     }, [blockedText, currentAiResult, router]);
+
+    const takePhoto = useCallback(async () => {
+        if (hasSubmittedProof) {
+            showBlockedAlert();
+            return;
+        }
+
+        const perm = await ImagePicker.requestCameraPermissionsAsync();
+        if (!perm.granted) {
+            Alert.alert("권한 필요", "카메라 권한을 허용해줘.");
+            return;
+        }
+
+        await Haptics.selectionAsync();
+        const res = await ImagePicker.launchCameraAsync({
+            allowsEditing: true,
+            quality: 0.8,
+        });
+
+        if (res.canceled) return;
+        const uri = res.assets?.[0]?.uri;
+        if (!uri) return;
+
+        setLocalUri(uri);
+    }, [hasSubmittedProof, showBlockedAlert]);
 
     const explainServerLimit = useCallback(
         async (data: any, status?: number) => {
@@ -204,14 +208,18 @@ export default function Proof() {
         // ✅ 업로드 직전 한번 더 상태 체크(중복 업로드 방지)
         const latest = await refreshProofStatus();
         const ai = (latest?.proof?.aiResult ?? null) as any;
-        if (ai === "PENDING" || ai === "HOLD") {
+        if (latest?.proof) {
             const msg =
                 ai === "PENDING"
                     ? "현재 인증이 검토중이라 추가 업로드가 제한돼요."
-                    : "현재 인증이 보류(검토) 상태라 추가 업로드가 제한돼요.";
+                    : ai === "HOLD"
+                        ? "현재 인증이 보류(검토) 상태라 추가 업로드가 제한돼요."
+                        : ai === "PASS"
+                            ? "이미 승인된 인증이 있어 추가 업로드가 제한돼요."
+                            : "이미 거절 처리된 인증이 있어 추가 업로드가 제한돼요.";
             Alert.alert(
                 "추가 업로드 불가",
-                `${msg}\n\n현재 상태: ${ai === "PENDING" ? "검토중" : "보류(검토)"}\n포인트 내역에서 진행/결과를 확인할 수 있어요.`,
+                `${msg}\n\n현재 상태: ${ai === "PENDING" ? "검토중" : ai === "HOLD" ? "보류(검토)" : ai === "PASS" ? "승인" : "거절"}\n포인트 내역에서 진행/결과를 확인할 수 있어요.`,
                 [
                     { text: "포인트 보기", onPress: () => router.replace("/(tabs)/points") },
                     { text: "닫기", style: "cancel" },
@@ -356,9 +364,9 @@ export default function Proof() {
                                 style={{
                                     padding: 10,
                                     borderRadius: 12,
-                                    backgroundColor: isBlockedByStatus ? "#FFF7ED" : "#F0FDF4",
+                                    backgroundColor: hasSubmittedProof ? "#FFF7ED" : "#F0FDF4",
                                     borderWidth: 1,
-                                    borderColor: isBlockedByStatus ? "#FDBA74" : "#86EFAC",
+                                    borderColor: hasSubmittedProof ? "#FDBA74" : "#86EFAC",
                                 }}
                             >
                                 <Text style={{ fontWeight: "900", color: "#111" }}>
@@ -424,7 +432,9 @@ export default function Proof() {
                                 justifyContent: "center",
                             }}
                         >
-                            <Text style={{ color: "#888", fontWeight: "800" }}>사진을 촬영해줘</Text>
+                            <Text style={{ color: "#888", fontWeight: "800" }}>
+                                {hasSubmittedProof ? "이미 접수된 인증이 있어요" : "사진을 촬영해줘"}
+                            </Text>
                         </View>
                     )}
 
@@ -435,20 +445,22 @@ export default function Proof() {
                         style={{
                             paddingVertical: 14,
                             borderRadius: 14,
-                            backgroundColor: "#111",
+                            backgroundColor: hasSubmittedProof ? "#D1D5DB" : "#111",
                             alignItems: "center",
                             opacity: uploading ? 0.6 : 1,
                         }}
-                        disabled={uploading}
+                        disabled={uploading || hasSubmittedProof}
                     >
-                        <Text style={{ color: "#FFF", fontWeight: "900" }}>카메라로 촬영하기</Text>
+                        <Text style={{ color: "#FFF", fontWeight: "900" }}>
+                            {hasSubmittedProof ? "이미 인증 접수됨" : "카메라로 촬영하기"}
+                        </Text>
                     </Pressable>
 
                     <View style={{ height: 10 }} />
 
                     <Pressable
                         onPress={() => {
-                            if (isBlockedByStatus) {
+                            if (hasSubmittedProof) {
                                 showBlockedAlert();
                                 return;
                             }
@@ -465,8 +477,8 @@ export default function Proof() {
                         <Text style={{ color: "#FFF", fontWeight: "900" }}>
                             {uploading
                                 ? "업로드 중..."
-                                : isBlockedByStatus
-                                    ? "검토중(업로드 불가)"
+                                : hasSubmittedProof
+                                    ? "업로드 불가"
                                     : "인증 업로드"}
                         </Text>
                     </Pressable>

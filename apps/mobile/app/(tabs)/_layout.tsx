@@ -23,7 +23,7 @@ export default function TabLayout() {
                 headerStyle: { backgroundColor: "#FFF6EE" },
                 headerTitleStyle: { fontWeight: "900" },
                 tabBarStyle: {
-                    backgroundColor: "#FFFFFF",
+                    backgroundColor: "#FFF6EE",
                     borderTopWidth: 0,
                     elevation: 0,
                 },

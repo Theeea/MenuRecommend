@@ -703,9 +703,13 @@ describe('ProofService.processPendingBatch', () => {
       .spyOn(service as any, 'judgeFoodWithOpenAI')
       .mockResolvedValue({
         match: true,
-        confidence: 0.9,
+        confidence: 0.95,
         detected: ['김치찌개'],
         reason: 'matches expected menu',
+        realPhotoLikely: true,
+        screenOrPrintSuspicion: false,
+        stockOrWebImageSuspicion: false,
+        fraudSignals: [],
       });
 
     const result = await service.processPendingBatch(5);
@@ -717,7 +721,7 @@ describe('ProofService.processPendingBatch', () => {
         {
           id: 'proof-1',
           result: 'PASS',
-          score: 90,
+          score: 95,
           bonus: { ok: true, earned: 40, balanceAfter: 50 },
         },
       ],
@@ -740,12 +744,12 @@ describe('ProofService.processPendingBatch', () => {
       where: { id: 'proof-1' },
       data: expect.objectContaining({
         aiResult: 'PASS',
-        aiScore: 90,
+        aiScore: 95,
         aiModel: 'test-vision',
         reviewedAt: expect.any(Date),
         aiMeta: expect.objectContaining({
           qr: { sessionId: 'session-1', code: 'ABC123' },
-          openai: expect.objectContaining({ match: true, confidence: 0.9 }),
+          openai: expect.objectContaining({ match: true, confidence: 0.95 }),
           attempts: 1,
           processingAt: null,
           processedAt: expect.any(String),
@@ -797,9 +801,13 @@ describe('ProofService.processPendingBatch', () => {
       .mockResolvedValue(null);
     jest.spyOn(service as any, 'judgeFoodWithOpenAI').mockResolvedValue({
       match: true,
-      confidence: 0.88,
+      confidence: 0.94,
       detected: ['김치찌개'],
       reason: 'matches expected menu',
+      realPhotoLikely: true,
+      screenOrPrintSuspicion: false,
+      stockOrWebImageSuspicion: false,
+      fraudSignals: [],
     });
 
     const result = await service.processPendingBatch(5);
@@ -808,7 +816,7 @@ describe('ProofService.processPendingBatch', () => {
       {
         id: 'proof-1',
         result: 'PASS',
-        score: 88,
+        score: 94,
         bonus: {
           ok: true,
           earned: 0,
