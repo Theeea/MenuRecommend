@@ -501,7 +501,6 @@ describe('ProofService.reviewByAdminKey', () => {
           aiScore: 92,
           aiModel: 'admin',
           reviewedAt: expect.any(Date),
-          reviewedByAdminId: 'admin',
           aiMeta: expect.objectContaining({
             rawUrl: '/uploads/raw/raw-1.jpg',
             adminMeta: { reason: 'manual pass' },

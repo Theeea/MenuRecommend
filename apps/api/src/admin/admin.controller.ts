@@ -3,12 +3,14 @@ import {
   Controller,
   Get,
   Headers,
+  Param,
   Post,
   Query,
   UnauthorizedException,
   BadRequestException,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { MenuDraftService } from './menu-draft.service';
 
 // -------------------- auth --------------------
 function assertAdminKey(headerKey?: string) {
@@ -120,12 +122,50 @@ function buildProofStats(items: any[]) {
 
 @Controller('admin')
 export class AdminController {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly menuDrafts: MenuDraftService,
+  ) {}
 
   @Post('auth-check')
   authCheck(@Headers('x-admin-key') adminKey?: string) {
     assertAdminKey(adminKey);
     return { ok: true };
+  }
+
+  @Get('menu-drafts')
+  listMenuDrafts(
+    @Headers('x-admin-key') adminKey: string | undefined,
+    @Query('status') status?: string,
+    @Query('cuisine') cuisine?: string,
+    @Query('take') take?: string,
+  ) {
+    return this.menuDrafts.list(adminKey, { status, cuisine, take });
+  }
+
+  @Post('menu-drafts/generate')
+  generateMenuDrafts(
+    @Headers('x-admin-key') adminKey: string | undefined,
+    @Body() body: { cuisine?: string; count?: unknown; memo?: string },
+  ) {
+    return this.menuDrafts.generate(adminKey, body ?? {});
+  }
+
+  @Post('menu-drafts/:id/approve')
+  approveMenuDraft(
+    @Headers('x-admin-key') adminKey: string | undefined,
+    @Param('id') id: string,
+  ) {
+    return this.menuDrafts.approve(adminKey, id);
+  }
+
+  @Post('menu-drafts/:id/reject')
+  rejectMenuDraft(
+    @Headers('x-admin-key') adminKey: string | undefined,
+    @Param('id') id: string,
+    @Body() body?: { reason?: string },
+  ) {
+    return this.menuDrafts.reject(adminKey, id, body);
   }
 
   // -------------------- PAGES --------------------
@@ -196,6 +236,7 @@ export class AdminController {
   <div class="nav">
     <a href="/admin/review">Review</a>
     <a class="secondary" href="/admin/points">Points</a>
+    <a class="secondary" href="/admin/menu-drafts/page">Menu Drafts</a>
   </div>
   <div style="flex:1"></div>
   <button class="secondary" onclick="openKey()">관리자 키</button>
@@ -591,6 +632,7 @@ export class AdminController {
   <div class="nav">
     <a class="secondary" href="/admin/review">Proof Review</a>
     <a href="/admin/points">Points</a>
+    <a class="secondary" href="/admin/menu-drafts/page">Menu Drafts</a>
   </div>
 
   <input id="key" placeholder="ADMIN_REVIEW_KEY" />
@@ -875,6 +917,360 @@ export class AdminController {
   // boot
   if(getKey()){
     loadLedger(true);
+  }else{
+    showKeyModal("관리자 키가 필요해. 입력해줘.");
+  }
+</script>
+</body>
+</html>
+    `.trim();
+
+    return html;
+  }
+
+  // 관리자 AI 메뉴 초안 페이지
+  @Get('menu-drafts/page')
+  menuDraftsPage() {
+    const html = `
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="robots" content="noindex,nofollow"/>
+  <title>Menu Drafts Admin</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,sans-serif;margin:0;background:#f6f6f8;color:#111}
+    header{position:sticky;top:0;background:#fff;border-bottom:1px solid #eee;padding:12px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;z-index:10}
+    .nav a{display:inline-block;padding:10px 12px;border-radius:10px;background:#111;color:#fff;font-weight:900;text-decoration:none}
+    .nav a.secondary{background:#666}
+    input,select,textarea{padding:10px 12px;border:1px solid #ddd;border-radius:10px;font:inherit;background:#fff}
+    textarea{min-height:42px;resize:vertical}
+    button{padding:10px 12px;border:0;border-radius:10px;background:#111;color:#fff;font-weight:900;cursor:pointer}
+    button.secondary{background:#666}
+    button.pass{background:#0a7a2f}
+    button.fail{background:#c62828}
+    button:disabled{opacity:.55;cursor:not-allowed}
+    main{padding:16px;max-width:1280px;margin:0 auto}
+    .box{background:#fff;border:1px solid #eee;border-radius:16px;padding:12px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:12px;margin-top:12px}
+    .card{background:#fff;border:1px solid #eee;border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:10px}
+    .title{font-size:18px;font-weight:900}
+    .muted{color:#666;font-weight:700}
+    .pill{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:#f1f1f1;font-weight:800;margin:2px}
+    .pill.PENDING{background:#e8f0ff;color:#1e40af}
+    .pill.APPROVED{background:#e7ffe8;color:#166534}
+    .pill.REJECTED{background:#ffe7e7;color:#991b1b}
+    .pill.MAIN{background:#fff4d6;color:#854d0e}
+    .pill.SUB{background:#ecfeff;color:#155e75}
+    .pill.OPTIONAL{background:#f3f4f6;color:#374151}
+    .actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:auto}
+    pre{white-space:pre-wrap;background:#fafafa;border:1px solid #eee;border-radius:12px;padding:10px;margin:0;max-height:180px;overflow:auto}
+    #keyModal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:9999;align-items:center;justify-content:center}
+    #keyModal .modal{width:min(520px,92vw);background:#fff;border-radius:16px;padding:16px;border:1px solid #eee}
+    #keyModal input{width:100%;box-sizing:border-box}
+  </style>
+</head>
+<body>
+  <div id="keyModal">
+    <div class="modal">
+      <div class="title">관리자 키 입력</div>
+      <div class="muted" id="keyModalMsg" style="margin:8px 0 12px"></div>
+      <input id="keyModalInput" placeholder="ADMIN_REVIEW_KEY" />
+      <div class="row" style="justify-content:flex-end;margin-top:12px">
+        <button onclick="saveKeyFromModal()">저장</button>
+      </div>
+    </div>
+  </div>
+
+<header>
+  <div class="nav">
+    <a class="secondary" href="/admin/review">Proof Review</a>
+    <a class="secondary" href="/admin/points">Points</a>
+    <a href="/admin/menu-drafts/page">Menu Drafts</a>
+  </div>
+  <input id="key" placeholder="ADMIN_REVIEW_KEY" />
+  <button onclick="saveKeyFromHeader()">키 저장</button>
+  <span id="status" class="muted" style="margin-left:auto"></span>
+</header>
+
+<main>
+  <div class="box">
+    <div class="row">
+      <strong>AI 메뉴 후보 생성</strong>
+      <label class="muted">Cuisine</label>
+      <select id="genCuisine">
+        <option value="">전체</option>
+        <option value="KOREAN">한식</option>
+        <option value="CHINESE">중식</option>
+        <option value="JAPANESE">일식</option>
+        <option value="WESTERN">양식</option>
+        <option value="ASIAN">아시아</option>
+        <option value="SNACK">분식</option>
+        <option value="FASTFOOD">패스트푸드</option>
+        <option value="SALAD">샐러드</option>
+        <option value="DESSERT">디저트</option>
+        <option value="ETC">기타</option>
+      </select>
+      <label class="muted">개수</label>
+      <input id="genCount" type="number" min="1" max="30" value="10" style="width:90px"/>
+      <input id="genMemo" placeholder="생성 메모" style="min-width:300px"/>
+      <button id="generateBtn" onclick="generateDrafts()">AI 생성</button>
+    </div>
+    <div class="muted" style="margin-top:10px">
+      AI 결과는 바로 추천 메뉴에 들어가지 않고 PENDING 초안으로 저장됩니다. 승인해야 실제 Menu/Ingredient에 반영됩니다.
+    </div>
+  </div>
+
+  <div style="height:12px"></div>
+
+  <div class="box">
+    <div class="row">
+      <strong>초안 목록</strong>
+      <label class="muted">Status</label>
+      <select id="statusFilter">
+        <option value="PENDING" selected>PENDING</option>
+        <option value="APPROVED">APPROVED</option>
+        <option value="REJECTED">REJECTED</option>
+        <option value="ALL">ALL</option>
+      </select>
+      <label class="muted">Cuisine</label>
+      <select id="cuisineFilter">
+        <option value="">전체</option>
+        <option value="KOREAN">한식</option>
+        <option value="CHINESE">중식</option>
+        <option value="JAPANESE">일식</option>
+        <option value="WESTERN">양식</option>
+        <option value="ASIAN">아시아</option>
+        <option value="SNACK">분식</option>
+        <option value="FASTFOOD">패스트푸드</option>
+        <option value="SALAD">샐러드</option>
+        <option value="DESSERT">디저트</option>
+        <option value="ETC">기타</option>
+      </select>
+      <label class="muted">Take</label>
+      <select id="take">
+        <option value="20">20</option>
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+      </select>
+      <button onclick="loadDrafts()">조회</button>
+    </div>
+    <div id="list" class="grid"></div>
+  </div>
+</main>
+
+<script>
+  function getKey(){ return (localStorage.getItem("ADMIN_REVIEW_KEY") || "").trim(); }
+  function setKey(k){ localStorage.setItem("ADMIN_REVIEW_KEY", (k||"").trim()); }
+  function clearKey(){ localStorage.removeItem("ADMIN_REVIEW_KEY"); }
+
+  const keyInput = document.getElementById("key");
+  keyInput.value = getKey();
+
+  function escapeHtml(s){
+    return String(s||"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+  }
+
+  function showKeyModal(msg){
+    document.getElementById("keyModalMsg").textContent = msg || "";
+    document.getElementById("keyModal").style.display = "flex";
+    document.getElementById("keyModalInput").value = "";
+    setTimeout(() => document.getElementById("keyModalInput").focus(), 30);
+  }
+
+  function hideKeyModal(){ document.getElementById("keyModal").style.display = "none"; }
+
+  async function authCheck(k){
+    const res = await fetch("/admin/auth-check", { method:"POST", headers:{ "x-admin-key": k } });
+    if(!res.ok) throw new Error("Invalid admin key");
+    return res.json();
+  }
+
+  async function saveKeyFromModal(){
+    const v = document.getElementById("keyModalInput").value.trim();
+    if(!v) return alert("키를 입력해줘");
+    try{
+      await authCheck(v);
+      setKey(v);
+      keyInput.value = v;
+      hideKeyModal();
+      loadDrafts();
+    }catch(e){
+      clearKey();
+      alert("키가 올바르지 않아");
+    }
+  }
+
+  async function saveKeyFromHeader(){
+    const v = keyInput.value.trim();
+    if(!v) return showKeyModal("관리자 키를 입력해줘.");
+    try{
+      await authCheck(v);
+      setKey(v);
+      loadDrafts();
+    }catch(e){
+      clearKey();
+      showKeyModal("키가 올바르지 않아. 다시 입력해줘.");
+    }
+  }
+
+  function ensureKeyOrShow(){
+    if(getKey()) return true;
+    showKeyModal("관리자 키가 필요해. 입력해줘.");
+    return false;
+  }
+
+  async function api(path, opts={}){
+    const res = await fetch(path, {
+      ...opts,
+      headers:{
+        "Content-Type":"application/json",
+        "x-admin-key": getKey(),
+        ...(opts.headers || {})
+      }
+    });
+    if(res.status === 401){
+      clearKey();
+      showKeyModal("관리자 키가 필요해. 다시 입력해줘.");
+      throw new Error("401 Unauthorized");
+    }
+    if(!res.ok){
+      const t = await res.text();
+      throw new Error(res.status + " " + t);
+    }
+    return res.json();
+  }
+
+  function setStatus(text){ document.getElementById("status").textContent = text || ""; }
+
+  function buildListQuery(){
+    const p = new URLSearchParams();
+    const status = document.getElementById("statusFilter").value;
+    const cuisine = document.getElementById("cuisineFilter").value;
+    const take = document.getElementById("take").value;
+    p.set("status", status);
+    p.set("take", take);
+    if(cuisine) p.set("cuisine", cuisine);
+    return p.toString();
+  }
+
+  async function loadDrafts(){
+    if(!ensureKeyOrShow()) return;
+    setStatus("초안 로딩중...");
+    try{
+      const data = await api("/admin/menu-drafts?" + buildListQuery());
+      renderDrafts(data.items || []);
+      setStatus("초안 " + (data.items || []).length + "건");
+    }catch(e){
+      setStatus("에러: " + e.message);
+    }
+  }
+
+  async function generateDrafts(){
+    if(!ensureKeyOrShow()) return;
+    const btn = document.getElementById("generateBtn");
+    const body = {
+      cuisine: document.getElementById("genCuisine").value || undefined,
+      count: Number(document.getElementById("genCount").value || 10),
+      memo: document.getElementById("genMemo").value.trim()
+    };
+    btn.disabled = true;
+    setStatus("AI 생성중...");
+    try{
+      const data = await api("/admin/menu-drafts/generate", {
+        method:"POST",
+        body: JSON.stringify(body)
+      });
+      setStatus("저장 " + data.savedCount + "건 / 스킵 " + (data.skipped || []).length + "건");
+      if((data.skipped || []).length){
+        console.log("skipped", data.skipped);
+      }
+      document.getElementById("statusFilter").value = "PENDING";
+      document.getElementById("cuisineFilter").value = body.cuisine || "";
+      await loadDrafts();
+    }catch(e){
+      setStatus("에러: " + e.message);
+      alert("AI 생성 실패: " + e.message);
+    }finally{
+      btn.disabled = false;
+    }
+  }
+
+  async function approveDraft(id){
+    if(!ensureKeyOrShow()) return;
+    if(!confirm("이 초안을 실제 메뉴 DB에 승인 반영할까?")) return;
+    setStatus("승인 처리중...");
+    try{
+      await api("/admin/menu-drafts/" + encodeURIComponent(id) + "/approve", { method:"POST" });
+      await loadDrafts();
+    }catch(e){
+      setStatus("에러: " + e.message);
+      alert("승인 실패: " + e.message);
+    }
+  }
+
+  async function rejectDraft(id){
+    if(!ensureKeyOrShow()) return;
+    const reason = prompt("거절 사유", "") || "";
+    setStatus("거절 처리중...");
+    try{
+      await api("/admin/menu-drafts/" + encodeURIComponent(id) + "/reject", {
+        method:"POST",
+        body: JSON.stringify({ reason })
+      });
+      await loadDrafts();
+    }catch(e){
+      setStatus("에러: " + e.message);
+      alert("거절 실패: " + e.message);
+    }
+  }
+
+  function ingredientPills(items){
+    if(!Array.isArray(items)) return "";
+    return items.map((x) => {
+      const name = escapeHtml(x && x.name ? x.name : "-");
+      const role = escapeHtml(x && x.role ? x.role : "SUB");
+      const removable = escapeHtml(x && x.removable ? x.removable : "UNKNOWN");
+      const weight = escapeHtml(x && x.weight ? x.weight : 1);
+      return '<span class="pill '+role+'">'+name+' / '+role+' / '+removable+' / w'+weight+'</span>';
+    }).join("");
+  }
+
+  function renderDrafts(items){
+    const el = document.getElementById("list");
+    if(!items.length){
+      el.innerHTML = '<div class="muted">표시할 초안이 없습니다.</div>';
+      return;
+    }
+
+    el.innerHTML = items.map((it) => {
+      const isPending = it.status === "PENDING";
+      const tags = Array.isArray(it.tags) ? it.tags : [];
+      const idArg = JSON.stringify(String(it.id || ""));
+      return '<div class="card">' +
+        '<div class="row">' +
+          '<span class="pill '+escapeHtml(it.status)+'">'+escapeHtml(it.status)+'</span>' +
+          '<span class="pill">'+escapeHtml(it.cuisine)+'</span>' +
+          '<span class="pill">'+escapeHtml(it.dishType || "OTHER")+'</span>' +
+        '</div>' +
+        '<div class="title">'+escapeHtml(it.name)+'</div>' +
+        '<div class="muted">normalized: '+escapeHtml(it.normalizedName)+'</div>' +
+        '<div>'+escapeHtml(it.description || "")+'</div>' +
+        '<div>'+tags.map((x) => '<span class="pill">'+escapeHtml(x)+'</span>').join("")+'</div>' +
+        '<div>'+ingredientPills(it.ingredients)+'</div>' +
+        '<div class="actions">' +
+          '<button class="pass" '+(isPending ? "" : "disabled")+' onclick="approveDraft('+idArg+')">승인</button>' +
+          '<button class="fail" '+(isPending ? "" : "disabled")+' onclick="rejectDraft('+idArg+')">거절</button>' +
+        '</div>' +
+        '<pre>'+escapeHtml(JSON.stringify(it.aiMeta || {}, null, 2))+'</pre>' +
+      '</div>';
+    }).join("");
+  }
+
+  if(getKey()){
+    loadDrafts();
   }else{
     showKeyModal("관리자 키가 필요해. 입력해줘.");
   }

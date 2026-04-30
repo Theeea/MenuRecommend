@@ -160,6 +160,37 @@ model Menu {
   @@index([cuisine, dishType])
 }
 
+model MenuDraft {
+  id             String    @id @default(cuid())
+  name           String
+  normalizedName String
+  cuisine        Cuisine
+  dishType       DishType?
+
+  // AI가 제안한 재료 초안.
+  // 예: [{ "name": "김치", "role": "MAIN", "removable": "NO", "weight": 5 }]
+  ingredients Json
+
+  description String?
+  tags        Json?
+
+  source String @default("AI")
+  status String @default("PENDING") // PENDING | APPROVED | REJECTED
+
+  aiMeta Json?
+
+  menuId     String?
+  reviewedAt DateTime?
+  reviewedBy String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+  @@index([cuisine, status])
+  @@index([normalizedName, cuisine])
+}
+
 model MenuIngredient {
   menuId       String
   ingredientId String

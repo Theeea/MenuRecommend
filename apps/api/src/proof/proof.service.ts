@@ -7,7 +7,7 @@ import {
   NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { Prisma, ProofResult, RecommendStatus } from '../../generated/prisma/client';
+import { Prisma, ProofResult } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { existsSync, readFileSync } from 'fs';
 import { join, resolve } from 'path';
@@ -151,7 +151,12 @@ export class ProofService {
             aiResult: { in: [ProofResult.PENDING, ProofResult.HOLD] },
             session: { userId },
           },
-          select: { id: true, sessionId: true, aiResult: true, createdAt: true },
+          select: {
+            id: true,
+            sessionId: true,
+            aiResult: true,
+            createdAt: true,
+          },
           orderBy: { createdAt: 'desc' },
         });
 
@@ -308,7 +313,6 @@ export class ProofService {
             processedAt: new Date().toISOString(),
           },
           reviewedAt: new Date(),
-          reviewedByAdminId: 'admin',
         },
         include: { session: true },
       });
@@ -453,7 +457,9 @@ export class ProofService {
             dishType: proof.session.menu.dishType
               ? String(proof.session.menu.dishType)
               : null,
-            ingredients: this.pickMainIngredients(proof.session.menu.ingredients),
+            ingredients: this.pickMainIngredients(
+              proof.session.menu.ingredients,
+            ),
           },
         });
 
@@ -474,14 +480,19 @@ export class ProofService {
               processingAt: null,
               processedAt: new Date().toISOString(),
             },
-            reviewedAt: result === 'PASS' || result === 'FAIL' ? new Date() : null,
+            reviewedAt:
+              result === 'PASS' || result === 'FAIL' ? new Date() : null,
           },
         });
 
         // 4) PASS면 보너스 + 세션 DONE
         if (result === 'PASS') {
           const bonus = await this.prisma.$transaction(async (tx) => {
-            const b = await this.givePassBonus(proof.session.userId, updated.id, tx);
+            const b = await this.givePassBonus(
+              proof.session.userId,
+              updated.id,
+              tx,
+            );
             await tx.recommendSession.update({
               where: { id: proof.sessionId },
               data: { status: 'DONE' as any, doneAt: new Date() },
@@ -523,7 +534,8 @@ export class ProofService {
               attempts: Number(meta.attempts ?? 0) + 1,
               lastErrorAt: new Date().toISOString(),
               processingAt: null,
-              processedAt: (isQuota || isMissingFile) ? new Date().toISOString() : null,
+              processedAt:
+                isQuota || isMissingFile ? new Date().toISOString() : null,
             },
           },
         });
@@ -626,7 +638,10 @@ export class ProofService {
 
     const parsed = JSON.parse(res.output_text) as AiDecision;
 
-    parsed.confidence = Math.max(0, Math.min(1, Number(parsed.confidence ?? 0)));
+    parsed.confidence = Math.max(
+      0,
+      Math.min(1, Number(parsed.confidence ?? 0)),
+    );
     parsed.detected = Array.isArray(parsed.detected)
       ? parsed.detected.map(String).slice(0, 20)
       : [];
@@ -659,7 +674,9 @@ export class ProofService {
     proofImageUrl: string,
     expectedSessionId: string,
     expectedChallengeCode: string | null,
-  ): Promise<{ ok: true; qr: any } | { ok: false; error: string; qr?: any } | null> {
+  ): Promise<
+    { ok: true; qr: any } | { ok: false; error: string; qr?: any } | null
+  > {
     try {
       // expectedChallengeCode가 없으면 QR 검증 의미 없음
       if (!expectedChallengeCode) return null;
@@ -777,7 +794,8 @@ export class ProofService {
 
     // /uploads/xxx 형태면 프로젝트 루트 기준으로 uploads 디렉토리로 매핑
     const idx = u.indexOf('/uploads/');
-    const rel = idx >= 0 ? u.slice(idx + '/uploads/'.length) : u.replace(/^\/+/, '');
+    const rel =
+      idx >= 0 ? u.slice(idx + '/uploads/'.length) : u.replace(/^\/+/, '');
 
     // apps/api/uploads 가 아니라, 프로젝트에서 정적서빙하는 uploads 경로 기준
     // (현재 구조 기준: process.cwd() = apps/api)
