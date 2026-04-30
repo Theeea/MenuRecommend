@@ -56,6 +56,7 @@ export class ShopService {
           points: true,
           status: true,
           itemSnapshot: true,
+          fulfillmentMeta: true,
           fulfilledAt: true,
           cancelledAt: true,
           createdAt: true,
@@ -214,6 +215,186 @@ export class ShopService {
           ok: true,
           purchase,
           balance: user?.pointBalance ?? 0,
+        };
+      });
+    } catch (e: any) {
+      if (isMissingShopTableError(e)) {
+        throw new ServiceUnavailableException({
+          code: 'SHOP_MIGRATION_REQUIRED',
+          message: '포인트 사용 DB migration이 필요합니다.',
+        });
+      }
+      throw e;
+    }
+  }
+
+  async markPurchaseSentByAdmin(
+    purchaseId: string,
+    body?: { memo?: string; code?: string },
+  ) {
+    const normalizedId = String(purchaseId ?? '').trim();
+    if (!normalizedId) throw new BadRequestException('purchaseId is required');
+
+    const memo = String(body?.memo ?? '').trim();
+    const code = String(body?.code ?? '').trim();
+
+    try {
+      return await this.prisma.$transaction(async (tx: any) => {
+        const purchase = await tx.userPurchase.findUnique({
+          where: { id: normalizedId },
+        });
+        if (!purchase) throw new NotFoundException('purchase not found');
+        if (purchase.status !== 'REQUESTED') {
+          throw new ConflictException({
+            code: 'SHOP_PURCHASE_NOT_SENDABLE',
+            message:
+              '발송 대기 상태의 구매 요청만 발송 완료 처리할 수 있습니다.',
+          });
+        }
+
+        const updated = await tx.userPurchase.updateMany({
+          where: { id: normalizedId, status: 'REQUESTED' },
+          data: {
+            status: 'SENT',
+            fulfilledAt: new Date(),
+            fulfillmentMeta: {
+              ...(purchase.fulfillmentMeta &&
+              typeof purchase.fulfillmentMeta === 'object'
+                ? purchase.fulfillmentMeta
+                : {}),
+              memo: memo || null,
+              code: code || null,
+              sentBy: 'admin',
+              sentAt: new Date().toISOString(),
+            },
+          },
+        });
+
+        if (updated.count !== 1) {
+          throw new ConflictException({
+            code: 'SHOP_PURCHASE_STATUS_CHANGED',
+            message: '구매 요청 상태가 이미 변경되었습니다.',
+          });
+        }
+
+        const item = await tx.userPurchase.findUnique({
+          where: { id: normalizedId },
+          include: { shopItem: true, user: true },
+        });
+        return { ok: true, item };
+      });
+    } catch (e: any) {
+      if (isMissingShopTableError(e)) {
+        throw new ServiceUnavailableException({
+          code: 'SHOP_MIGRATION_REQUIRED',
+          message: '포인트 사용 DB migration이 필요합니다.',
+        });
+      }
+      throw e;
+    }
+  }
+
+  async cancelPurchaseByUser(
+    userId: string,
+    purchaseId: string,
+    reason: string,
+  ) {
+    return this.cancelPurchase(purchaseId, reason, 'user', userId);
+  }
+
+  async cancelPurchaseByAdmin(purchaseId: string, reason: string) {
+    return this.cancelPurchase(purchaseId, reason, 'admin');
+  }
+
+  private async cancelPurchase(
+    purchaseId: string,
+    reason: string,
+    actor: 'admin' | 'user',
+    userId?: string,
+  ) {
+    const normalizedId = String(purchaseId ?? '').trim();
+    if (!normalizedId) throw new BadRequestException('purchaseId is required');
+
+    const cancelReason = String(reason ?? '').trim();
+    if (!cancelReason) throw new BadRequestException('reason is required');
+
+    try {
+      return await this.prisma.$transaction(async (tx: any) => {
+        const purchase = await tx.userPurchase.findUnique({
+          where: { id: normalizedId },
+          include: { shopItem: true },
+        });
+
+        if (!purchase) throw new NotFoundException('purchase not found');
+        if (userId && purchase.userId !== userId) {
+          throw new NotFoundException('purchase not found');
+        }
+        if (purchase.status !== 'REQUESTED') {
+          throw new ConflictException({
+            code: 'SHOP_PURCHASE_NOT_CANCELABLE',
+            message: '발송 대기 상태의 구매 요청만 취소할 수 있습니다.',
+          });
+        }
+
+        const statusUpdate = await tx.userPurchase.updateMany({
+          where: { id: normalizedId, status: 'REQUESTED' },
+          data: {
+            status: 'CANCELLED',
+            cancelledAt: new Date(),
+            fulfillmentMeta: {
+              ...(purchase.fulfillmentMeta &&
+              typeof purchase.fulfillmentMeta === 'object'
+                ? purchase.fulfillmentMeta
+                : {}),
+              cancelReason,
+              cancelledBy: actor,
+              cancelledAt: new Date().toISOString(),
+            },
+          },
+        });
+        if (statusUpdate.count !== 1) {
+          throw new ConflictException({
+            code: 'SHOP_PURCHASE_STATUS_CHANGED',
+            message: '구매 요청 상태가 이미 변경되었습니다.',
+          });
+        }
+
+        const refundPoints = Math.max(0, Number(purchase.points) || 0);
+        const user = await tx.user.update({
+          where: { id: purchase.userId },
+          data: { pointBalance: { increment: refundPoints } },
+          select: { pointBalance: true },
+        });
+
+        if (purchase.shopItem?.stock != null) {
+          await tx.shopItem.update({
+            where: { id: purchase.shopItemId },
+            data: { stock: { increment: 1 } },
+          });
+        }
+
+        const cancelled = await tx.userPurchase.findUnique({
+          where: { id: normalizedId },
+        });
+
+        await tx.pointLedger.create({
+          data: {
+            userId: purchase.userId,
+            kind: 'ADJUST',
+            source: 'ADMIN',
+            sourceId: purchase.id,
+            points: refundPoints,
+            balanceAfter: user.pointBalance,
+            note: `구매 취소 환불: ${purchase.shopItem?.name ?? '상품'} (${cancelReason})`,
+            dedupeKey: `SHOP:CANCEL:${purchase.id}`,
+          },
+        });
+
+        return {
+          ok: true,
+          purchase: cancelled,
+          refunded: refundPoints,
+          balance: user.pointBalance,
         };
       });
     } catch (e: any) {

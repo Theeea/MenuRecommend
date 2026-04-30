@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Get,
+  Param,
   Post,
   Query,
   Req,
@@ -33,5 +34,18 @@ export class ShopController {
   ) {
     const n = Math.min(Math.max(parseInt(take ?? '20', 10) || 20, 1), 50);
     return this.shop.listMyPurchases(req.user.userId, n, cursor);
+  }
+
+  @Post('me/purchases/:id/cancel')
+  cancelMyPurchase(
+    @Req() req: any,
+    @Param('id') id: string,
+    @Body() body: { reason?: string },
+  ) {
+    return this.shop.cancelPurchaseByUser(
+      req.user.userId,
+      id,
+      body?.reason ?? '',
+    );
   }
 }

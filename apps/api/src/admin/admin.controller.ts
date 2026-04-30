@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { MenuDraftService } from './menu-draft.service';
+import { ShopService } from '../shop/shop.service';
 import {
   CUISINE_LABELS,
   DISH_TYPE_LABELS,
@@ -171,6 +172,7 @@ export class AdminController {
   constructor(
     private readonly prisma: PrismaService,
     private readonly menuDrafts: MenuDraftService,
+    private readonly shop: ShopService,
   ) {}
 
   @Post('auth-check')
@@ -350,18 +352,17 @@ export class AdminController {
     @Body() body?: { memo?: string; code?: string },
   ) {
     assertAdminKey(adminKey);
-    const item = await (this.prisma as any).userPurchase.update({
-      where: { id },
-      data: {
-        status: 'SENT',
-        fulfilledAt: new Date(),
-        fulfillmentMeta: {
-          memo: String(body?.memo ?? '').trim() || null,
-          code: String(body?.code ?? '').trim() || null,
-        },
-      },
-    });
-    return { ok: true, item };
+    return this.shop.markPurchaseSentByAdmin(id, body);
+  }
+
+  @Post('shop/purchases/:id/cancel')
+  async adminCancelPurchase(
+    @Headers('x-admin-key') adminKey: string | undefined,
+    @Param('id') id: string,
+    @Body() body?: { reason?: string },
+  ) {
+    assertAdminKey(adminKey);
+    return this.shop.cancelPurchaseByAdmin(id, body?.reason ?? '');
   }
 
   // -------------------- PAGES --------------------
@@ -530,7 +531,7 @@ export class AdminController {
           '<div class="title">'+esc(name)+'</div>' +
           '<div class="row"><span class="pill">'+esc(p.status)+'</span><span class="pill">'+esc(p.points)+'P</span><span class="pill">'+esc(p.createdAt)+'</span></div>' +
           '<div class="muted">user: '+esc(p.user ? p.user.email : p.userId)+' / balance: '+esc(p.user ? p.user.pointBalance : '-')+'</div>' +
-          '<div class="row"><input id="code-'+esc(p.id)+'" placeholder="교환권 코드/식별값"/><input id="memo-'+esc(p.id)+'" placeholder="발송 메모"/><button class="pass" onclick="markSent(\\''+esc(p.id)+'\\')">발송 완료</button></div>' +
+          '<div class="row"><input id="code-'+esc(p.id)+'" placeholder="교환권 코드/식별값"/><input id="memo-'+esc(p.id)+'" placeholder="발송 메모"/><button class="pass" onclick="markSent(\\''+esc(p.id)+'\\')" '+(p.status==="REQUESTED"?"":"disabled")+'>발송 완료</button><button class="fail" onclick="cancelPurchase(\\''+esc(p.id)+'\\')" '+(p.status==="REQUESTED"?"":"disabled")+'>취소/환불</button></div>' +
           '<pre>'+esc(JSON.stringify(p.fulfillmentMeta || p.itemSnapshot || {}, null, 2))+'</pre>' +
         '</div>';
       }).join("") || '<div class="muted">구매 요청이 없습니다.</div>';
@@ -541,6 +542,15 @@ export class AdminController {
     if(!confirm("발송 완료 처리할까?")) return;
     try{
       await api("/admin/shop/purchases/"+encodeURIComponent(id)+"/sent", { method:"POST", body: JSON.stringify({ code: document.getElementById("code-"+id).value, memo: document.getElementById("memo-"+id).value }) });
+      loadPurchases();
+    }catch(e){ alert(e.message); }
+  }
+  async function cancelPurchase(id){
+    const reason = prompt("취소/환불 사유", "");
+    if(!reason || !reason.trim()) return alert("취소 사유는 필수입니다.");
+    if(!confirm("구매 요청을 취소하고 포인트를 환불할까?")) return;
+    try{
+      await api("/admin/shop/purchases/"+encodeURIComponent(id)+"/cancel", { method:"POST", body: JSON.stringify({ reason: reason.trim() }) });
       loadPurchases();
     }catch(e){ alert(e.message); }
   }

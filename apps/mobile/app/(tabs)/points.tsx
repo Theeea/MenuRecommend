@@ -9,6 +9,7 @@ import {
     RefreshControl,
     ScrollView,
     Text,
+    TextInput,
     useWindowDimensions,
     View,
 } from "react-native";
@@ -80,6 +81,12 @@ type PurchaseItem = {
     createdAt: string;
     fulfilledAt?: string | null;
     cancelledAt?: string | null;
+    fulfillmentMeta?: {
+        memo?: string | null;
+        code?: string | null;
+        cancelReason?: string | null;
+        cancelledBy?: string | null;
+    } | null;
     shopItem?: {
         id: string;
         name: string;
@@ -350,6 +357,9 @@ export default function PointsScreen() {
     const [shopItems, setShopItems] = useState<ShopItem[]>([]);
     const [purchases, setPurchases] = useState<PurchaseItem[]>([]);
     const [purchasingId, setPurchasingId] = useState<string | null>(null);
+    const [cancelTarget, setCancelTarget] = useState<PurchaseItem | null>(null);
+    const [cancelReason, setCancelReason] = useState("");
+    const [voucherTarget, setVoucherTarget] = useState<PurchaseItem | null>(null);
 
     const [loading, setLoading] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
@@ -542,6 +552,31 @@ export default function PointsScreen() {
                 },
             },
         ]);
+    };
+
+    const submitCancelPurchase = async () => {
+        if (!cancelTarget) return;
+        const reason = cancelReason.trim();
+        if (!reason) {
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
+            Alert.alert("사유 필요", "구매 취소 사유를 입력해 주세요.");
+            return;
+        }
+
+        try {
+            await apiFetch<any>(`/me/purchases/${cancelTarget.id}/cancel`, tokenRaw, {
+                method: "POST",
+                body: JSON.stringify({ reason }),
+            });
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            setCancelTarget(null);
+            setCancelReason("");
+            await Promise.all([loadBalance(), loadLedger(null, false), loadShop()]);
+            Alert.alert("취소 완료", "포인트가 환불되었어요.");
+        } catch (e: any) {
+            await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+            Alert.alert("취소 실패", "이미 발송되었거나 상태가 변경된 요청일 수 있어요.");
+        }
     };
 
     const timeline: TimelineItem[] = useMemo(() => {
@@ -780,6 +815,98 @@ export default function PointsScreen() {
                 </View>
             </Modal>
 
+            <Modal
+                visible={!!cancelTarget}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setCancelTarget(null)}
+            >
+                <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.45)", justifyContent: "center", padding: 18 }}>
+                    <View style={{ backgroundColor: "#fff", borderRadius: 18, padding: 16 }}>
+                        <Text style={{ fontSize: 17, fontWeight: "900", color: "#111827" }}>구매 취소</Text>
+                        <Text style={{ marginTop: 8, color: "#6B7280", lineHeight: 19 }}>
+                            발송 대기 상태일 때만 취소할 수 있어요. 취소되면 포인트가 환불됩니다.
+                        </Text>
+                        <TextInput
+                            value={cancelReason}
+                            onChangeText={setCancelReason}
+                            placeholder="취소 사유"
+                            multiline
+                            style={{
+                                marginTop: 12,
+                                minHeight: 78,
+                                borderWidth: 1,
+                                borderColor: "#E5E7EB",
+                                borderRadius: 14,
+                                padding: 12,
+                                textAlignVertical: "top",
+                                color: "#111827",
+                            }}
+                        />
+                        <View style={{ flexDirection: "row", gap: 10, marginTop: 12 }}>
+                            <Pressable
+                                onPress={() => {
+                                    setCancelTarget(null);
+                                    setCancelReason("");
+                                }}
+                                style={{ flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: "#F3F4F6", alignItems: "center" }}
+                            >
+                                <Text style={{ fontWeight: "900", color: "#111827" }}>닫기</Text>
+                            </Pressable>
+                            <Pressable
+                                onPress={submitCancelPurchase}
+                                style={{ flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: "#B42318", alignItems: "center" }}
+                            >
+                                <Text style={{ fontWeight: "900", color: "#fff" }}>취소/환불</Text>
+                            </Pressable>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+
+            <Modal
+                visible={!!voucherTarget}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setVoucherTarget(null)}
+            >
+                <View style={{ flex: 1, backgroundColor: "rgba(0,0,0,0.55)", justifyContent: "center", padding: 18 }}>
+                    <View style={{ backgroundColor: "#fff", borderRadius: 18, padding: 16 }}>
+                        <Text style={{ fontSize: 17, fontWeight: "900", color: "#111827" }}>모바일교환권</Text>
+                        <Text style={{ marginTop: 8, color: "#6B7280", fontWeight: "700" }}>
+                            {voucherTarget?.shopItem?.name ?? voucherTarget?.itemSnapshot?.name ?? "상품"}
+                        </Text>
+                        <View
+                            style={{
+                                marginTop: 14,
+                                borderRadius: 16,
+                                backgroundColor: "#F9FAFB",
+                                borderWidth: 1,
+                                borderColor: "#E5E7EB",
+                                padding: 18,
+                                alignItems: "center",
+                            }}
+                        >
+                            <Ionicons name="qr-code-outline" size={74} color="#111827" />
+                            <Text selectable style={{ marginTop: 12, fontSize: 22, fontWeight: "900", color: "#111827", textAlign: "center" }}>
+                                {voucherTarget?.fulfillmentMeta?.code || "코드 확인 필요"}
+                            </Text>
+                            {!!voucherTarget?.fulfillmentMeta?.memo && (
+                                <Text style={{ marginTop: 8, color: "#6B7280", textAlign: "center" }}>
+                                    {voucherTarget.fulfillmentMeta.memo}
+                                </Text>
+                            )}
+                        </View>
+                        <Pressable
+                            onPress={() => setVoucherTarget(null)}
+                            style={{ marginTop: 12, paddingVertical: 12, borderRadius: 12, backgroundColor: "#111827", alignItems: "center" }}
+                        >
+                            <Text style={{ color: "#fff", fontWeight: "900" }}>닫기</Text>
+                        </Pressable>
+                    </View>
+                </View>
+            </Modal>
+
             {/* 상단 잔액 */}
             <View style={{ paddingHorizontal: 16, paddingTop: 10, paddingBottom: 12 }}>
                 <View
@@ -878,7 +1005,11 @@ export default function PointsScreen() {
             >
                 {/* 사용 */}
                 <View style={{ width, flex: 1, paddingHorizontal: 16 }}>
-                    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 30 }}>
+                    <ScrollView
+                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={{ paddingBottom: 30 }}
+                        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => refreshAll(true)} />}
+                    >
                         <View style={{ backgroundColor: CARD_BG, borderRadius: 18, padding: 16, borderWidth: 1, borderColor: "#F1E8E0" }}>
                             <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
                                 <View
@@ -989,6 +1120,8 @@ export default function PointsScreen() {
                                     const name = p.shopItem?.name ?? p.itemSnapshot?.name ?? "상품";
                                     const status =
                                         p.status === "SENT" ? "발송 완료" : p.status === "CANCELLED" ? "취소됨" : "발송 대기";
+                                    const cancelReason = p.fulfillmentMeta?.cancelReason;
+                                    const hasVoucherCode = p.status === "SENT" && !!p.fulfillmentMeta?.code;
                                     return (
                                         <View key={p.id} style={{ paddingVertical: 8, borderTopWidth: 1, borderColor: "#F3F4F6" }}>
                                             <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
@@ -1000,6 +1133,32 @@ export default function PointsScreen() {
                                             <Text style={{ marginTop: 4, fontSize: 12, color: "#6B7280" }}>
                                                 {status} · -{fmtNumber(p.points)}P
                                             </Text>
+                                            {!!cancelReason && (
+                                                <Text style={{ marginTop: 4, fontSize: 12, color: "#B42318", fontWeight: "700" }}>
+                                                    취소 사유: {cancelReason}
+                                                </Text>
+                                            )}
+                                            <View style={{ flexDirection: "row", gap: 8, marginTop: 8 }}>
+                                                {p.status === "REQUESTED" && (
+                                                    <Pressable
+                                                        onPress={() => {
+                                                            setCancelTarget(p);
+                                                            setCancelReason("");
+                                                        }}
+                                                        style={{ paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: "#FEE4E2" }}
+                                                    >
+                                                        <Text style={{ color: "#B42318", fontWeight: "900", fontSize: 12 }}>취소</Text>
+                                                    </Pressable>
+                                                )}
+                                                {hasVoucherCode && (
+                                                    <Pressable
+                                                        onPress={() => setVoucherTarget(p)}
+                                                        style={{ paddingVertical: 8, paddingHorizontal: 10, borderRadius: 10, backgroundColor: "#111827" }}
+                                                    >
+                                                        <Text style={{ color: "#fff", fontWeight: "900", fontSize: 12 }}>교환권 보기</Text>
+                                                    </Pressable>
+                                                )}
+                                            </View>
                                         </View>
                                     );
                                 })}
