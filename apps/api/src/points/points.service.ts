@@ -79,6 +79,17 @@ export class PointsService {
         balanceAfter: true,
         note: true,
         createdAt: true,
+        proof: {
+          select: {
+            id: true,
+            createdAt: true,
+            session: {
+              select: {
+                menu: { select: { id: true, name: true } },
+              },
+            },
+          },
+        },
       },
     });
 

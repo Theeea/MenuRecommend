@@ -621,6 +621,31 @@ export class AdminController {
       '</div>';
   }
 
+  function correctionHistory(it){
+    const corrections = it && it.aiMeta && Array.isArray(it.aiMeta.corrections) ? it.aiMeta.corrections : [];
+    if(!corrections.length) return "";
+
+    const rows = corrections.map((c, idx) => {
+      const from = label(PROOF_RESULT_LABELS, c && c.from, c && c.from ? c.from : "-");
+      const to = label(PROOF_RESULT_LABELS, c && c.to, c && c.to ? c.to : "-");
+      const at = c && c.at ? c.at : "-";
+      const reason = c && c.reason ? c.reason : "-";
+      return '' +
+        '<div class="row" style="margin-top:6px">' +
+          '<span class="pill">#'+escapeHtml(idx + 1)+'</span>' +
+          '<span class="pill">'+escapeHtml(from)+' → '+escapeHtml(to)+'</span>' +
+          '<span class="pill">at: '+escapeHtml(at)+'</span>' +
+          '<span class="pill">사유: '+escapeHtml(reason)+'</span>' +
+        '</div>';
+    }).join("");
+
+    return '' +
+      '<div class="box" style="padding:10px;background:#fff7ed;border-color:#fed7aa">' +
+        '<div class="title" style="font-size:14px">판정 정정 이력</div>' +
+        rows +
+      '</div>';
+  }
+
   function actionButtons(it){
     if(it.aiResult === "PASS"){
       return '<button class="fail" onclick="correctReview(\\''+escapeHtml(it.id)+'\\',\\'FAIL\\')">정정: '+escapeHtml(label(PROOF_RESULT_LABELS, "FAIL", "FAIL"))+'</button>';
@@ -658,6 +683,7 @@ export class AdminController {
               \${actionButtons(it)}
             </div>
             \${aiDecisionSummary(it)}
+            \${correctionHistory(it)}
             <pre>\${escapeHtml(JSON.stringify(it.aiMeta || {}, null, 2))}</pre>
           </div>
         </div>

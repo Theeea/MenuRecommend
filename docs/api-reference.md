@@ -70,10 +70,86 @@
 - 관리자 수동 리뷰를 처리합니다.
 - `PASS`이면 포인트를 지급합니다.
 - `PASS` 또는 `FAIL`이면 세션을 `DONE`으로 변경합니다.
+- 이미 `PASS` 또는 `FAIL`인 Proof는 정정하지 않고 idempotent하게 반환합니다.
 
 인증:
 
 - `x-admin-key` 헤더
+
+요청 예시:
+
+```json
+{
+  "result": "PASS",
+  "score": 95,
+  "model": "admin",
+  "meta": {
+    "reason": "관리자 수동 승인"
+  }
+}
+```
+
+### `POST /proofs/:id/correct-review`
+
+역할:
+
+- 최종 판정된 Proof를 관리자 판단으로 정정합니다.
+- `PASS -> FAIL`이면 포인트를 회수합니다.
+- `FAIL -> PASS`이면 포인트를 재지급합니다.
+- 일반 리뷰와 분리된 정정 전용 API입니다.
+
+인증:
+
+- `x-admin-key` 헤더
+
+필수 입력:
+
+- `result`: 정정 후 최종 상태. `PASS` 또는 `FAIL`
+- `reason`: 정정 사유. 빈 문자열 불가
+
+선택 입력:
+
+- `score`
+- `model`
+- `meta`
+
+요청 예시:
+
+```json
+{
+  "result": "FAIL",
+  "reason": "검색 이미지로 확인됨"
+}
+```
+
+정책:
+
+- 현재 상태가 `PASS` 또는 `FAIL`인 Proof만 정정할 수 있습니다.
+- 현재 상태와 같은 `result`를 보내면 변경 없이 반환합니다.
+- `Proof.aiMeta.corrections`에 정정 이력을 append합니다.
+- `RecommendSession`은 `DONE`을 유지합니다.
+- 기존 포인트 ledger는 삭제하지 않습니다.
+- 보정 내역은 `PointLedger`에 `kind=ADJUST`, `source=ADMIN`으로 추가합니다.
+- 정정 ledger는 `PROOF:CORRECTION:<proofId>:<sequence>:<FROM>_TO_<TO>` dedupeKey를 사용합니다.
+
+응답 개념:
+
+```json
+{
+  "ok": true,
+  "proof": {},
+  "correction": {
+    "from": "PASS",
+    "to": "FAIL",
+    "reason": "검색 이미지로 확인됨"
+  },
+  "pointAdjustment": {
+    "ok": true,
+    "points": -40,
+    "balanceAfter": 120
+  }
+}
+```
 
 ## Me
 
@@ -114,10 +190,13 @@
 역할:
 
 - 포인트 ledger 목록을 반환합니다.
+- `proofId`가 있는 ledger는 연결된 Proof의 메뉴명/인증일을 함께 내려줍니다.
 
 모바일 정책:
 
 - Proof 카드를 별도로 보여주므로 `source=PROOF` ledger는 클라이언트에서 제외해 중복 표시를 막습니다.
+- 관리자 판정 정정 ledger는 `source=ADMIN`이므로 제외하지 않습니다.
+- 정정 ledger는 `인증 판정 정정 <음식명>/<YY.MM.DD>` 형태로 보여줍니다.
 
 ### `/me/blocked-menus`
 

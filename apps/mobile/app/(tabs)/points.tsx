@@ -23,6 +23,13 @@ type LedgerItem = {
     source?: string | null;
     sourceId?: string | null;
     proofId?: string | null;
+    proof?: {
+        id: string;
+        createdAt: string;
+        session?: {
+            menu?: { id: string; name: string } | null;
+        } | null;
+    } | null;
     points: number;
     balanceAfter?: number | null;
     note?: string | null;
@@ -68,6 +75,16 @@ function fmtDate(iso: string) {
         hour: "2-digit",
         minute: "2-digit",
     });
+}
+
+function fmtShortDate(iso?: string | null) {
+    if (!iso) return "";
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "";
+    const yy = String(d.getFullYear()).slice(-2);
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    return `${yy}.${mm}.${dd}`;
 }
 
 function pickErrorMessage(json: any, fallbackText: string) {
@@ -192,22 +209,68 @@ function proofPointsText(p: ProofItem) {
     return `+0점 (${p.isProcessing ? proofProcessingLabel() : proofResultLabel("PENDING")})`;
 }
 
-function ledgerTitle(l: LedgerItem) {
+function parseCorrectionLedger(l: LedgerItem) {
     const note = String(l.note ?? "").trim();
     const correction = note.match(/^proof review correction\s+(PASS|FAIL)->(PASS|FAIL):\s*(.*)$/i);
     if (correction) {
         const from = proofResultLabel(correction[1].toUpperCase(), correction[1]);
         const to = proofResultLabel(correction[2].toUpperCase(), correction[2]);
         const reason = correction[3]?.trim();
-        return reason ? `인증 판정 정정: ${from} → ${to} · ${reason}` : `인증 판정 정정: ${from} → ${to}`;
+        return { from, to, reason };
     }
 
-    if (note.startsWith("인증 판정 정정 ")) {
-        return note.replace(/^인증 판정 정정\s+/, "인증 판정 정정: ");
+    const koCorrection = note.match(/^인증 판정 정정\s+(.+?)->(.+?)(?::\s*(.*))?$/);
+    if (koCorrection) {
+        return {
+            from: koCorrection[1].trim(),
+            to: koCorrection[2].trim(),
+            reason: koCorrection[3]?.trim(),
+        };
     }
 
+    return null;
+}
+
+function ledgerTitle(l: LedgerItem) {
+    const correction = parseCorrectionLedger(l);
+    if (correction) return "인증 판정 정정";
+
+    const note = String(l.note ?? "").trim();
     if (note) return note;
     return pointKindLabel(l.kind, "") || "포인트 변동";
+}
+
+function ledgerSubtitle(l: LedgerItem) {
+    const correction = parseCorrectionLedger(l);
+    if (!correction) return "";
+    return correction.reason
+        ? `${correction.from} → ${correction.to} · ${correction.reason}`
+        : `${correction.from} → ${correction.to}`;
+}
+
+function ledgerPointText(l: LedgerItem) {
+    const sign = l.points >= 0 ? "+" : "";
+    const correction = parseCorrectionLedger(l);
+    if (correction) {
+        return `${sign}${fmtNumber(l.points)}점 ${l.points < 0 ? "회수" : "지급"}`;
+    }
+    return `${sign}${fmtNumber(l.points)}점`;
+}
+
+function proofTitle(menuName?: string | null, createdAt?: string | null) {
+    const date = fmtShortDate(createdAt);
+    if (menuName && date) return `인증:${menuName}/${date}`;
+    if (menuName) return `인증:${menuName}`;
+    if (date) return `인증:${date}`;
+    return "인증";
+}
+
+function correctionTitle(menuName?: string | null, createdAt?: string | null) {
+    const date = fmtShortDate(createdAt);
+    if (menuName && date) return `인증 판정 정정, ${menuName}/${date}`;
+    if (menuName) return `인증 판정 정정, ${menuName}`;
+    if (date) return `인증 판정 정정, ${date}`;
+    return "인증 판정 정정";
 }
 
 // ✅ rawUrl 우선순위 계산(서버가 rawUrl을 안 주고 aiMeta.rawUrl만 주는 케이스까지 커버)
@@ -396,7 +459,7 @@ export default function PointsScreen() {
     const openImageModal = (p: ProofItem) => {
         const raw = getRawUrl(p);
         const uri = toAbsoluteUrl(raw || p.imageUrl); // ✅ 유저는 raw 우선
-        const title = p.menu?.name ? `인증: ${p.menu.name}` : "인증";
+        const title = proofTitle(p.menu?.name, p.createdAt);
         const sub = proofPointsText(p);
         if (!uri) return;
 
@@ -409,7 +472,7 @@ export default function PointsScreen() {
             const p = item.proof;
             const raw = getRawUrl(p);
             const thumb = toAbsoluteUrl(raw || p.imageUrl); // ✅ 유저 썸네일도 raw 우선
-            const title = p.menu?.name ? `인증: ${p.menu.name}` : "인증";
+            const title = proofTitle(p.menu?.name, p.createdAt);
             const label = proofStatusLabel(p.aiResult, p.isProcessing);
 
             return (
@@ -463,9 +526,18 @@ export default function PointsScreen() {
         }
 
         const l = item.ledger;
-        const sign = l.points >= 0 ? "+" : "";
-        const title = ledgerTitle(l);
+        const correction = parseCorrectionLedger(l);
+        const proofFromLedger = l.proof ?? proofs.find((p) => p.id === l.proofId) ?? null;
+        const proofMenuName =
+            l.proof?.session?.menu?.name ?? (proofFromLedger as ProofItem | null)?.menu?.name ?? null;
+        const proofCreatedAt = proofFromLedger?.createdAt ?? null;
+        const title = correction ? correctionTitle(proofMenuName, proofCreatedAt) : ledgerTitle(l);
+        const subtitle = ledgerSubtitle(l);
         const source = pointSourceLabel(l.source, "");
+        const accent = correction ? (l.points < 0 ? "#B42318" : "#166534") : INK;
+        const accentBg = correction ? (l.points < 0 ? "#FEE4E2" : "#DCFCE7") : INK;
+        const amountColor = correction ? accent : "#111827";
+        const iconName = correction ? (l.points < 0 ? "return-down-back-outline" : "checkmark-done-outline") : null;
 
         return (
             <View
@@ -484,26 +556,35 @@ export default function PointsScreen() {
                         width: 48,
                         height: 48,
                         borderRadius: 12,
-                        backgroundColor: INK,
+                        backgroundColor: accentBg,
                         alignItems: "center",
                         justifyContent: "center",
                     }}
                 >
-                    <Text style={{ color: "#fff", fontWeight: "900" }}>P</Text>
+                    {iconName ? (
+                        <Ionicons name={iconName as any} size={22} color={accent} />
+                    ) : (
+                        <Text style={{ color: "#fff", fontWeight: "900" }}>P</Text>
+                    )}
                 </View>
 
                 <View style={{ flex: 1, minWidth: 0 }}>
                     <View style={{ flexDirection: "row", justifyContent: "space-between", gap: 10 }}>
-                        <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: "800", flex: 1 }}>
+                        <Text numberOfLines={1} style={{ fontSize: 14, fontWeight: "800", flex: 1, color: "#111827" }}>
                             {title}
                         </Text>
                         <Text style={{ fontSize: 12, color: "#6B7280" }}>{fmtDate(l.createdAt)}</Text>
                     </View>
 
+                    {!!subtitle && (
+                        <Text numberOfLines={2} style={{ marginTop: 4, fontSize: 12, color: "#6B7280", fontWeight: "700" }}>
+                            {subtitle}
+                        </Text>
+                    )}
+
                     <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6 }}>
-                        <Text style={{ fontSize: 13, color: "#111827", fontWeight: "700" }}>
-                            {sign}
-                            {fmtNumber(l.points)}점
+                        <Text style={{ fontSize: 13, color: amountColor, fontWeight: "800" }}>
+                            {ledgerPointText(l)}
                         </Text>
                         {(l.balanceAfter ?? null) !== null ? (
                             <Text style={{ fontSize: 12, color: "#6B7280" }}>
