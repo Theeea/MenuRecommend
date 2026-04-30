@@ -35,6 +35,9 @@ function createPrismaMock() {
     pointLedger: {
       create: jest.fn(),
     },
+    auditLog: {
+      create: jest.fn(),
+    },
   };
 
   const prisma = {
@@ -150,6 +153,22 @@ describe('ShopService.purchase', () => {
         note: '포인트 사용: 커피 교환권',
       },
     });
+    expect(mock.tx.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorType: 'USER',
+        actorId: 'user-1',
+        action: 'SHOP_PURCHASE_REQUESTED',
+        targetType: 'UserPurchase',
+        targetId: 'purchase-1',
+        userId: 'user-1',
+        metadata: expect.objectContaining({
+          shopItemId: 'item-1',
+          itemName: '커피 교환권',
+          points: 100,
+          balanceAfter: 400,
+        }),
+      },
+    });
   });
 
   it('rejects when user balance is insufficient and does not create a purchase', async () => {
@@ -166,6 +185,7 @@ describe('ShopService.purchase', () => {
 
     expect(mock.tx.userPurchase.create).not.toHaveBeenCalled();
     expect(mock.tx.pointLedger.create).not.toHaveBeenCalled();
+    expect(mock.tx.auditLog.create).not.toHaveBeenCalled();
   });
 
   it('rejects when stock is already empty before charging points', async () => {
@@ -180,6 +200,7 @@ describe('ShopService.purchase', () => {
 
     expect(mock.tx.user.updateMany).not.toHaveBeenCalled();
     expect(mock.tx.userPurchase.create).not.toHaveBeenCalled();
+    expect(mock.tx.auditLog.create).not.toHaveBeenCalled();
   });
 
   it('refunds the user inside the transaction if stock becomes unavailable after charge', async () => {
@@ -201,6 +222,7 @@ describe('ShopService.purchase', () => {
     });
     expect(mock.tx.userPurchase.create).not.toHaveBeenCalled();
     expect(mock.tx.pointLedger.create).not.toHaveBeenCalled();
+    expect(mock.tx.auditLog.create).not.toHaveBeenCalled();
   });
 });
 
@@ -238,6 +260,22 @@ describe('ShopService.markPurchaseSentByAdmin', () => {
         }),
       },
     });
+    expect(mock.tx.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorType: 'ADMIN',
+        actorId: null,
+        action: 'SHOP_PURCHASE_SENT',
+        targetType: 'UserPurchase',
+        targetId: 'purchase-1',
+        userId: 'user-1',
+        metadata: expect.objectContaining({
+          shopItemId: 'item-1',
+          itemName: '커피 교환권',
+          codePresent: true,
+          memo: '매장 제시',
+        }),
+      },
+    });
   });
 
   it('does not send a purchase that was already cancelled or sent', async () => {
@@ -253,6 +291,7 @@ describe('ShopService.markPurchaseSentByAdmin', () => {
     ).rejects.toBeInstanceOf(ConflictException);
 
     expect(mock.tx.userPurchase.updateMany).not.toHaveBeenCalled();
+    expect(mock.tx.auditLog.create).not.toHaveBeenCalled();
   });
 });
 
@@ -324,6 +363,23 @@ describe('ShopService.cancelPurchase', () => {
         dedupeKey: 'SHOP:CANCEL:purchase-1',
       },
     });
+    expect(mock.tx.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorType: 'USER',
+        actorId: 'user-1',
+        action: 'SHOP_PURCHASE_CANCELLED',
+        targetType: 'UserPurchase',
+        targetId: 'purchase-1',
+        userId: 'user-1',
+        metadata: expect.objectContaining({
+          cancelledBy: 'user',
+          reason: '다른 상품으로 변경',
+          refunded: 100,
+          balanceAfter: 500,
+          shopItemId: 'item-1',
+        }),
+      },
+    });
   });
 
   it('rejects user cancellation after admin has sent the voucher', async () => {
@@ -341,6 +397,7 @@ describe('ShopService.cancelPurchase', () => {
     expect(mock.tx.userPurchase.updateMany).not.toHaveBeenCalled();
     expect(mock.tx.user.update).not.toHaveBeenCalled();
     expect(mock.tx.pointLedger.create).not.toHaveBeenCalled();
+    expect(mock.tx.auditLog.create).not.toHaveBeenCalled();
   });
 
   it('requires a cancellation reason', async () => {
@@ -392,6 +449,20 @@ describe('ShopService.setPurchaseUsedByUser', () => {
       include: { shopItem: true },
     });
     expect(mock.tx.pointLedger.create).not.toHaveBeenCalled();
+    expect(mock.tx.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorType: 'USER',
+        actorId: 'user-1',
+        action: 'SHOP_PURCHASE_USED_TOGGLED',
+        targetType: 'UserPurchase',
+        targetId: 'purchase-1',
+        userId: 'user-1',
+        metadata: expect.objectContaining({
+          usedByUser: true,
+          previousUsedByUser: false,
+        }),
+      },
+    });
   });
 
   it('rejects used toggle for another user purchase', async () => {
@@ -407,6 +478,7 @@ describe('ShopService.setPurchaseUsedByUser', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
 
     expect(mock.tx.userPurchase.update).not.toHaveBeenCalled();
+    expect(mock.tx.auditLog.create).not.toHaveBeenCalled();
   });
 
   it('rejects used toggle before the voucher is sent', async () => {
@@ -420,5 +492,6 @@ describe('ShopService.setPurchaseUsedByUser', () => {
     ).rejects.toBeInstanceOf(ConflictException);
 
     expect(mock.tx.userPurchase.update).not.toHaveBeenCalled();
+    expect(mock.tx.auditLog.create).not.toHaveBeenCalled();
   });
 });

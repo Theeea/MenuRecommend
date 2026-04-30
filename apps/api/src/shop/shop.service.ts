@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access */
 import {
   BadRequestException,
   ConflictException,
@@ -211,6 +212,22 @@ export class ShopService {
           },
         });
 
+        await this.writeAuditLog(tx, {
+          actorType: 'USER',
+          actorId: userId,
+          action: 'SHOP_PURCHASE_REQUESTED',
+          targetType: 'UserPurchase',
+          targetId: purchase.id,
+          userId,
+          metadata: {
+            shopItemId: item.id,
+            itemName: item.name,
+            points: item.pricePoints,
+            balanceAfter: user?.pointBalance ?? 0,
+            stockManaged: item.stock != null,
+          },
+        });
+
         return {
           ok: true,
           purchase,
@@ -281,6 +298,20 @@ export class ShopService {
           where: { id: normalizedId },
           include: { shopItem: true, user: true },
         });
+        await this.writeAuditLog(tx, {
+          actorType: 'ADMIN',
+          actorId: null,
+          action: 'SHOP_PURCHASE_SENT',
+          targetType: 'UserPurchase',
+          targetId: normalizedId,
+          userId: item?.userId ?? purchase.userId,
+          metadata: {
+            shopItemId: item?.shopItemId ?? purchase.shopItemId,
+            itemName: item?.shopItem?.name ?? null,
+            codePresent: !!code,
+            memo: memo || null,
+          },
+        });
         return { ok: true, item };
       });
     } catch (e: any) {
@@ -338,6 +369,23 @@ export class ShopService {
             },
           },
           include: { shopItem: true },
+        });
+
+        await this.writeAuditLog(tx, {
+          actorType: 'USER',
+          actorId: userId,
+          action: 'SHOP_PURCHASE_USED_TOGGLED',
+          targetType: 'UserPurchase',
+          targetId: normalizedId,
+          userId,
+          metadata: {
+            usedByUser: used,
+            previousUsedByUser:
+              purchase.fulfillmentMeta &&
+              typeof purchase.fulfillmentMeta === 'object'
+                ? purchase.fulfillmentMeta.usedByUser === true
+                : false,
+          },
         });
 
         return { ok: true, purchase: updated };
@@ -441,6 +489,24 @@ export class ShopService {
           },
         });
 
+        await this.writeAuditLog(tx, {
+          actorType: actor === 'admin' ? 'ADMIN' : 'USER',
+          actorId: actor === 'user' ? purchase.userId : null,
+          action: 'SHOP_PURCHASE_CANCELLED',
+          targetType: 'UserPurchase',
+          targetId: purchase.id,
+          userId: purchase.userId,
+          metadata: {
+            cancelledBy: actor,
+            reason: cancelReason,
+            refunded: refundPoints,
+            balanceAfter: user.pointBalance,
+            shopItemId: purchase.shopItemId,
+            itemName: purchase.shopItem?.name ?? null,
+            stockRestored: purchase.shopItem?.stock != null,
+          },
+        });
+
         return {
           ok: true,
           purchase: cancelled,
@@ -457,5 +523,30 @@ export class ShopService {
       }
       throw e;
     }
+  }
+
+  private async writeAuditLog(
+    tx: any,
+    data: {
+      actorType: 'USER' | 'ADMIN' | 'SYSTEM';
+      actorId?: string | null;
+      action: string;
+      targetType: string;
+      targetId?: string | null;
+      userId?: string | null;
+      metadata?: Record<string, any> | null;
+    },
+  ) {
+    await tx.auditLog.create({
+      data: {
+        actorType: data.actorType,
+        actorId: data.actorId ?? null,
+        action: data.action,
+        targetType: data.targetType,
+        targetId: data.targetId ?? null,
+        userId: data.userId ?? null,
+        metadata: data.metadata ?? null,
+      },
+    });
   }
 }

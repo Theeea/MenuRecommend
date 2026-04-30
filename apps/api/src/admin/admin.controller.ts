@@ -167,6 +167,31 @@ function renderSelectOptions(
     .join('\n');
 }
 
+function renderAdminNav(
+  active: 'review' | 'points' | 'menuDrafts' | 'shop' | 'audit',
+) {
+  const items = [
+    { key: 'review', label: 'Proof Review', href: '/admin/review' },
+    { key: 'points', label: 'Points', href: '/admin/points' },
+    {
+      key: 'menuDrafts',
+      label: 'Menu Drafts',
+      href: '/admin/menu-drafts/page',
+    },
+    { key: 'shop', label: 'Shop', href: '/admin/shop/page' },
+    { key: 'audit', label: 'Audit', href: '/admin/audit/page' },
+  ];
+
+  return `<div class="nav">
+${items
+  .map((item) => {
+    const className = item.key === active ? '' : ' class="secondary"';
+    return `    <a${className} href="${item.href}">${item.label}</a>`;
+  })
+  .join('\n')}
+  </div>`;
+}
+
 @Controller('admin')
 export class AdminController {
   constructor(
@@ -271,6 +296,23 @@ export class AdminController {
         status: body?.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
       },
     });
+    await (this.prisma as any).auditLog.create({
+      data: {
+        actorType: 'ADMIN',
+        actorId: null,
+        action: 'SHOP_ITEM_CREATED',
+        targetType: 'ShopItem',
+        targetId: item.id,
+        userId: null,
+        metadata: {
+          name: item.name,
+          pricePoints: item.pricePoints,
+          status: item.status,
+          stock: item.stock,
+          sortOrder: item.sortOrder,
+        },
+      },
+    });
     return { ok: true, item };
   }
 
@@ -315,6 +357,23 @@ export class AdminController {
         status: body?.status === 'INACTIVE' ? 'INACTIVE' : 'ACTIVE',
       },
     });
+    await (this.prisma as any).auditLog.create({
+      data: {
+        actorType: 'ADMIN',
+        actorId: null,
+        action: 'SHOP_ITEM_UPDATED',
+        targetType: 'ShopItem',
+        targetId: item.id,
+        userId: null,
+        metadata: {
+          name: item.name,
+          pricePoints: item.pricePoints,
+          status: item.status,
+          stock: item.stock,
+          sortOrder: item.sortOrder,
+        },
+      },
+    });
     return { ok: true, item };
   }
 
@@ -327,6 +386,21 @@ export class AdminController {
     const item = await (this.prisma as any).shopItem.update({
       where: { id },
       data: { status: 'INACTIVE' },
+    });
+    await (this.prisma as any).auditLog.create({
+      data: {
+        actorType: 'ADMIN',
+        actorId: null,
+        action: 'SHOP_ITEM_HIDDEN',
+        targetType: 'ShopItem',
+        targetId: item.id,
+        userId: null,
+        metadata: {
+          name: item.name,
+          previousRequest: { id },
+          status: item.status,
+        },
+      },
     });
     return { ok: true, item };
   }
@@ -387,7 +461,231 @@ export class AdminController {
     return this.shop.cancelPurchaseByAdmin(id, body?.reason ?? '');
   }
 
+  @Get('audit-logs')
+  async adminAuditLogs(
+    @Headers('x-admin-key') adminKey: string | undefined,
+    @Query('action') action?: string,
+    @Query('targetType') targetType?: string,
+    @Query('userId') userId?: string,
+    @Query('take') take?: string,
+  ) {
+    assertAdminKey(adminKey);
+    const where: any = {};
+    const a = String(action ?? '').trim();
+    const tt = String(targetType ?? '').trim();
+    const uid = String(userId ?? '').trim();
+    if (a && a !== 'ALL') where.action = a;
+    if (tt && tt !== 'ALL') where.targetType = tt;
+    if (uid) where.userId = uid;
+
+    const items = await (this.prisma as any).auditLog.findMany({
+      where,
+      take: clamp(toInt(take, 50), 1, 200),
+      orderBy: { createdAt: 'desc' },
+    });
+    return { ok: true, items };
+  }
+
   // -------------------- PAGES --------------------
+
+  @Get('audit/page')
+  auditPage() {
+    return `
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <meta name="robots" content="noindex,nofollow"/>
+  <title>Audit Admin</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Apple SD Gothic Neo,sans-serif;margin:0;background:#f6f6f8;color:#111}
+    header{position:sticky;top:0;background:#fff;border-bottom:1px solid #eee;padding:12px 14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;z-index:10}
+    .nav a{display:inline-block;padding:10px 12px;border-radius:10px;background:#111;color:#fff;font-weight:900;text-decoration:none}
+    .nav a.secondary{background:#666}
+    input,select{padding:10px 12px;border:1px solid #ddd;border-radius:10px;font:inherit;background:#fff}
+    button{padding:10px 12px;border:0;border-radius:10px;background:#111;color:#fff;font-weight:900;cursor:pointer}
+    button.secondary{background:#666}
+    main{padding:16px;max-width:1280px;margin:0 auto}
+    .box{background:#fff;border:1px solid #eee;border-radius:16px;padding:12px;margin-bottom:12px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .toolbar{position:sticky;top:62px;z-index:5}
+    .summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-bottom:12px}
+    .stat{background:#fff;border:1px solid #eee;border-radius:14px;padding:12px}
+    .stat .num{font-size:24px;font-weight:900;margin-top:4px}
+    .title{font-size:18px;font-weight:900}
+    .muted{color:#666;font-weight:700}
+    .pill{display:inline-flex;align-items:center;padding:5px 9px;border-radius:999px;background:#f1f1f1;font-size:12px;font-weight:900;white-space:nowrap}
+    .pill.USER{background:#dbeafe;color:#1d4ed8}
+    .pill.ADMIN{background:#fef3c7;color:#92400e}
+    .pill.SYSTEM{background:#f3f4f6;color:#374151}
+    .pill.purchase{background:#ecfdf5;color:#166534}
+    .pill.item{background:#f5f3ff;color:#6d28d9}
+    .tableWrap{background:#fff;border:1px solid #eee;border-radius:16px;overflow:auto}
+    table{width:100%;border-collapse:collapse;min-width:980px}
+    th,td{padding:11px 12px;border-bottom:1px solid #eee;text-align:left;vertical-align:top}
+    th{position:sticky;top:0;background:#fafafa;font-size:12px;color:#555;z-index:1}
+    tr.logRow{cursor:pointer}
+    tr.logRow:hover{background:#fafafa}
+    td.time{white-space:nowrap;color:#555;font-weight:800}
+    td.summaryCell{max-width:360px}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px}
+    .details{display:none;background:#fafafa}
+    .details.open{display:table-row}
+    pre{white-space:pre-wrap;background:#fff;border:1px solid #eee;border-radius:12px;padding:10px;margin:0;max-height:260px;overflow:auto}
+  </style>
+</head>
+<body>
+<header>
+  ${renderAdminNav('audit')}
+  <input id="key" placeholder="ADMIN_REVIEW_KEY" />
+  <button onclick="saveKey()">키 저장</button>
+  <span id="status" class="muted" style="margin-left:auto"></span>
+</header>
+<main>
+  <div id="summary" class="summary"></div>
+
+  <div class="box toolbar">
+    <div class="row" style="justify-content:space-between">
+      <div class="row">
+      <div class="title">감사로그</div>
+      <select id="action">
+        <option value="ALL">전체 액션</option>
+        <option value="SHOP_ITEM_CREATED">상품 등록</option>
+        <option value="SHOP_ITEM_UPDATED">상품 수정</option>
+        <option value="SHOP_ITEM_HIDDEN">상품 숨김</option>
+        <option value="SHOP_PURCHASE_REQUESTED">구매 요청</option>
+        <option value="SHOP_PURCHASE_SENT">교환권 발송</option>
+        <option value="SHOP_PURCHASE_CANCELLED">구매 취소/환불</option>
+        <option value="SHOP_PURCHASE_USED_TOGGLED">사용/미사용 변경</option>
+      </select>
+      <select id="targetType">
+        <option value="ALL">전체 대상</option>
+        <option value="ShopItem">상품</option>
+        <option value="UserPurchase">구매</option>
+      </select>
+      <input id="userId" placeholder="userId"/>
+      <select id="take"><option value="50">50건</option><option value="100">100건</option><option value="200">200건</option></select>
+      </div>
+      <button onclick="loadLogs()">조회</button>
+    </div>
+  </div>
+  <div class="tableWrap">
+    <table>
+      <thead>
+        <tr>
+          <th>시간</th>
+          <th>액션</th>
+          <th>주체</th>
+          <th>대상</th>
+          <th>유저</th>
+          <th>요약</th>
+        </tr>
+      </thead>
+      <tbody id="list"></tbody>
+    </table>
+  </div>
+</main>
+<script>
+  function getKey(){ return (localStorage.getItem("ADMIN_REVIEW_KEY") || "").trim(); }
+  function setStatus(s){ document.getElementById("status").textContent = s || ""; }
+  function saveKey(){ localStorage.setItem("ADMIN_REVIEW_KEY", document.getElementById("key").value.trim()); loadLogs(); }
+  function ensureKey(){ const k = getKey(); if(k) return k; const v = prompt("관리자 키를 입력해줘"); if(!v) return ""; localStorage.setItem("ADMIN_REVIEW_KEY", v.trim()); return v.trim(); }
+  function esc(s){ return String(s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;"); }
+  function fmtDate(v){
+    const d = new Date(v);
+    if(Number.isNaN(d.getTime())) return String(v || "");
+    return d.toLocaleString("ko-KR", { year:"2-digit", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit" });
+  }
+  function actionLabel(v){
+    return ({
+      SHOP_ITEM_CREATED:"상품 등록",
+      SHOP_ITEM_UPDATED:"상품 수정",
+      SHOP_ITEM_HIDDEN:"상품 숨김",
+      SHOP_PURCHASE_REQUESTED:"구매 요청",
+      SHOP_PURCHASE_SENT:"교환권 발송",
+      SHOP_PURCHASE_CANCELLED:"구매 취소/환불",
+      SHOP_PURCHASE_USED_TOGGLED:"사용/미사용 변경"
+    })[v] || v || "-";
+  }
+  function targetPill(type){
+    const cls = type === "UserPurchase" ? "purchase" : type === "ShopItem" ? "item" : "";
+    const label = type === "UserPurchase" ? "구매" : type === "ShopItem" ? "상품" : type || "-";
+    return '<span class="pill '+cls+'">'+esc(label)+'</span>';
+  }
+  function summarize(it){
+    const m = it.metadata || {};
+    if(it.action === "SHOP_PURCHASE_REQUESTED") return esc((m.itemName || "상품") + " / " + (m.points || 0) + "P 구매 요청");
+    if(it.action === "SHOP_PURCHASE_SENT") return esc((m.itemName || "상품") + " 발송" + (m.codePresent ? " / 코드 있음" : " / 코드 없음"));
+    if(it.action === "SHOP_PURCHASE_CANCELLED") return esc((m.itemName || "상품") + " 취소 / " + (m.refunded || 0) + "P 환불 / " + (m.reason || "-"));
+    if(it.action === "SHOP_PURCHASE_USED_TOGGLED") return esc(m.usedByUser ? "사용 처리" : "미사용으로 되돌림");
+    if(it.action === "SHOP_ITEM_CREATED") return esc((m.name || "상품") + " 등록 / " + (m.pricePoints || 0) + "P");
+    if(it.action === "SHOP_ITEM_UPDATED") return esc((m.name || "상품") + " 수정 / " + (m.status || "-"));
+    if(it.action === "SHOP_ITEM_HIDDEN") return esc((m.name || "상품") + " 숨김");
+    return esc(JSON.stringify(m || {}));
+  }
+  function renderSummary(items){
+    const counts = {};
+    for(const it of items) counts[it.action] = (counts[it.action] || 0) + 1;
+    const requested = counts.SHOP_PURCHASE_REQUESTED || 0;
+    const sent = counts.SHOP_PURCHASE_SENT || 0;
+    const cancelled = counts.SHOP_PURCHASE_CANCELLED || 0;
+    document.getElementById("summary").innerHTML =
+      '<div class="stat"><div class="muted">조회 로그</div><div class="num">'+items.length+'</div></div>' +
+      '<div class="stat"><div class="muted">구매 요청</div><div class="num">'+requested+'</div></div>' +
+      '<div class="stat"><div class="muted">교환권 발송</div><div class="num">'+sent+'</div></div>' +
+      '<div class="stat"><div class="muted">취소/환불</div><div class="num">'+cancelled+'</div></div>';
+  }
+  function toggleDetail(id){
+    const el = document.getElementById("detail-"+id);
+    if(el) el.classList.toggle("open");
+  }
+  async function api(path){
+    const k = ensureKey(); if(!k) throw new Error("ADMIN_REVIEW_KEY required");
+    const res = await fetch(path, { headers:{ "x-admin-key": k } });
+    const text = await res.text();
+    let json = null; try{ json = text ? JSON.parse(text) : null; }catch{}
+    if(!res.ok) throw new Error(text || ("HTTP " + res.status));
+    return json || {};
+  }
+  async function loadLogs(){
+    setStatus("로그 로딩중...");
+    try{
+      const qs = new URLSearchParams({
+        action: document.getElementById("action").value,
+        targetType: document.getElementById("targetType").value,
+        take: document.getElementById("take").value
+      });
+      const userId = document.getElementById("userId").value.trim();
+      if(userId) qs.set("userId", userId);
+      const data = await api("/admin/audit-logs?" + qs.toString());
+      const items = data.items || [];
+      renderSummary(items);
+      document.getElementById("list").innerHTML = items.map((it) => {
+        const rowId = esc(it.id || Math.random());
+        return '<tr class="logRow" onclick="toggleDetail(\\''+rowId+'\\')">' +
+          '<td class="time">'+esc(fmtDate(it.createdAt))+'</td>' +
+          '<td><span class="pill">'+esc(actionLabel(it.action))+'</span></td>' +
+          '<td><span class="pill '+esc(it.actorType || "")+'">'+esc(it.actorType || "-")+'</span><div class="mono muted">'+esc(it.actorId || "-")+'</div></td>' +
+          '<td>'+targetPill(it.targetType)+'<div class="mono muted">'+esc(it.targetId || "-")+'</div></td>' +
+          '<td class="mono">'+esc(it.userId || "-")+'</td>' +
+          '<td class="summaryCell">'+summarize(it)+'</td>' +
+        '</tr>' +
+        '<tr id="detail-'+rowId+'" class="details"><td colspan="6"><pre>'+esc(JSON.stringify({ id:it.id, action:it.action, actorType:it.actorType, actorId:it.actorId, targetType:it.targetType, targetId:it.targetId, userId:it.userId, metadata:it.metadata || {}, createdAt:it.createdAt }, null, 2))+'</pre></td></tr>';
+      }).join("") || '<tr><td colspan="6" class="muted" style="padding:28px;text-align:center">감사로그가 없습니다.</td></tr>';
+      setStatus(items.length + "건");
+    }catch(e){
+      setStatus("에러: " + e.message);
+      alert(e.message);
+    }
+  }
+  document.getElementById("key").value = getKey();
+  if(getKey()) loadLogs(); else ensureKey();
+</script>
+</body>
+</html>
+    `.trim();
+  }
 
   @Get('shop/page')
   shopPage() {
@@ -436,12 +734,7 @@ export class AdminController {
 </head>
 <body>
 <header>
-  <div class="nav">
-    <a class="secondary" href="/admin/review">Review</a>
-    <a class="secondary" href="/admin/points">Points</a>
-    <a class="secondary" href="/admin/menu-drafts/page">Menu Drafts</a>
-    <a href="/admin/shop/page">Shop</a>
-  </div>
+  ${renderAdminNav('shop')}
   <input id="key" placeholder="ADMIN_REVIEW_KEY" />
   <button onclick="saveKey()">키 저장</button>
   <span id="status" class="muted" style="margin-left:auto"></span>
@@ -706,12 +999,7 @@ export class AdminController {
 </head>
 <body>
 <header>
-  <div class="nav">
-    <a href="/admin/review">Review</a>
-    <a class="secondary" href="/admin/points">Points</a>
-    <a class="secondary" href="/admin/menu-drafts/page">Menu Drafts</a>
-    <a class="secondary" href="/admin/shop/page">Shop</a>
-  </div>
+  ${renderAdminNav('review')}
   <div style="flex:1"></div>
   <button class="secondary" onclick="openKey()">관리자 키</button>
 </header>
@@ -1189,12 +1477,7 @@ export class AdminController {
   </div>
 
 <header>
-  <div class="nav">
-    <a class="secondary" href="/admin/review">Proof Review</a>
-    <a href="/admin/points">Points</a>
-    <a class="secondary" href="/admin/menu-drafts/page">Menu Drafts</a>
-    <a class="secondary" href="/admin/shop/page">Shop</a>
-  </div>
+  ${renderAdminNav('points')}
 
   <input id="key" placeholder="ADMIN_REVIEW_KEY" />
   <button onclick="saveKeyFromHeader()">키 저장</button>
@@ -1546,12 +1829,7 @@ export class AdminController {
   </div>
 
 <header>
-  <div class="nav">
-    <a class="secondary" href="/admin/review">Proof Review</a>
-    <a class="secondary" href="/admin/points">Points</a>
-    <a href="/admin/menu-drafts/page">Menu Drafts</a>
-    <a class="secondary" href="/admin/shop/page">Shop</a>
-  </div>
+  ${renderAdminNav('menuDrafts')}
   <input id="key" placeholder="ADMIN_REVIEW_KEY" />
   <button onclick="saveKeyFromHeader()">키 저장</button>
   <span id="status" class="muted" style="margin-left:auto"></span>
