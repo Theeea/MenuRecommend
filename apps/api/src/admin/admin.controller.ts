@@ -1238,6 +1238,13 @@ export class AdminController {
     }).join("");
   }
 
+  function rejectReasonLine(it){
+    const meta = it && it.aiMeta && typeof it.aiMeta === "object" ? it.aiMeta : {};
+    const reason = meta.rejectReason || "";
+    if(!reason) return "";
+    return '<div class="muted"><strong>거절 사유:</strong> '+escapeHtml(reason)+'</div>';
+  }
+
   function renderDrafts(items){
     const el = document.getElementById("list");
     if(!items.length){
@@ -1248,7 +1255,7 @@ export class AdminController {
     el.innerHTML = items.map((it) => {
       const isPending = it.status === "PENDING";
       const tags = Array.isArray(it.tags) ? it.tags : [];
-      const idArg = JSON.stringify(String(it.id || ""));
+      const idAttr = escapeHtml(it.id || "");
       return '<div class="card">' +
         '<div class="row">' +
           '<span class="pill '+escapeHtml(it.status)+'">'+escapeHtml(it.status)+'</span>' +
@@ -1257,12 +1264,13 @@ export class AdminController {
         '</div>' +
         '<div class="title">'+escapeHtml(it.name)+'</div>' +
         '<div class="muted">normalized: '+escapeHtml(it.normalizedName)+'</div>' +
+        rejectReasonLine(it) +
         '<div>'+escapeHtml(it.description || "")+'</div>' +
         '<div>'+tags.map((x) => '<span class="pill">'+escapeHtml(x)+'</span>').join("")+'</div>' +
         '<div>'+ingredientPills(it.ingredients)+'</div>' +
         '<div class="actions">' +
-          '<button class="pass" '+(isPending ? "" : "disabled")+' onclick="approveDraft('+idArg+')">승인</button>' +
-          '<button class="fail" '+(isPending ? "" : "disabled")+' onclick="rejectDraft('+idArg+')">거절</button>' +
+          '<button class="pass" '+(isPending ? "" : "disabled")+' data-id="'+idAttr+'" onclick="approveDraft(this.dataset.id)">승인</button>' +
+          '<button class="fail" '+(isPending ? "" : "disabled")+' data-id="'+idAttr+'" onclick="rejectDraft(this.dataset.id)">거절</button>' +
         '</div>' +
         '<pre>'+escapeHtml(JSON.stringify(it.aiMeta || {}, null, 2))+'</pre>' +
       '</div>';
