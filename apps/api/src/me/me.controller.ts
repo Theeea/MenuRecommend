@@ -199,6 +199,14 @@ export class MeController {
 
       const processingAt = meta.processingAt ?? null;
       const processedAt = meta.processedAt ?? null;
+      const corrections = Array.isArray(meta.corrections)
+        ? meta.corrections.map((x: any) => ({
+            at: typeof x?.at === "string" ? x.at : null,
+            from: typeof x?.from === "string" ? x.from : null,
+            to: typeof x?.to === "string" ? x.to : null,
+            reason: typeof x?.reason === "string" ? x.reason : null,
+          }))
+        : [];
 
       let holdReason: "QUOTA" | "FILE" | "QR" | "REVIEW" | null = null;
       if (String(it.aiResult) === "HOLD") {
@@ -228,6 +236,9 @@ export class MeController {
         isProcessing: Boolean(processingAt && !processedAt),
         earnedPoints,
         holdReason,
+        hasCorrections: corrections.length > 0,
+        correctionCount: corrections.length,
+        latestCorrection: corrections.length ? corrections[corrections.length - 1] : null,
       };
     });
 

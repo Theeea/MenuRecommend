@@ -48,6 +48,14 @@ type ProofItem = {
     isProcessing: boolean;
     earnedPoints: number; // PASS 시 실제 지급된 점수(없으면 0)
     holdReason: "QUOTA" | "FILE" | "QR" | "REVIEW" | null;
+    hasCorrections?: boolean;
+    correctionCount?: number;
+    latestCorrection?: {
+        at?: string | null;
+        from?: string | null;
+        to?: string | null;
+        reason?: string | null;
+    } | null;
     menu: { id: string; name: string } | null;
 
     // 서버가 그대로 내려줄 수도 있는 레거시 필드 대비(타입엔 안 쓰지만 any로 접근)
@@ -265,6 +273,17 @@ function proofTitle(menuName?: string | null, createdAt?: string | null) {
     return "인증";
 }
 
+function correctionBadgeText(p: ProofItem) {
+    if (!p.hasCorrections) return "";
+    const latest = p.latestCorrection;
+    if (latest?.from && latest?.to) {
+        const from = proofResultLabel(latest.from, latest.from);
+        const to = proofResultLabel(latest.to, latest.to);
+        return `정정됨 ${from}→${to}`;
+    }
+    return p.correctionCount && p.correctionCount > 1 ? `정정됨 ${p.correctionCount}회` : "정정됨";
+}
+
 function correctionTitle(menuName?: string | null, createdAt?: string | null) {
     const date = fmtShortDate(createdAt);
     if (menuName && date) return `인증 판정 정정, ${menuName}/${date}`;
@@ -474,6 +493,7 @@ export default function PointsScreen() {
             const thumb = toAbsoluteUrl(raw || p.imageUrl); // ✅ 유저 썸네일도 raw 우선
             const title = proofTitle(p.menu?.name, p.createdAt);
             const label = proofStatusLabel(p.aiResult, p.isProcessing);
+            const correctionBadge = correctionBadgeText(p);
 
             return (
                 <View
@@ -513,6 +533,25 @@ export default function PointsScreen() {
                             </Text>
                             <Text style={{ fontSize: 12, color: "#6B7280" }}>{fmtDate(p.createdAt)}</Text>
                         </View>
+
+                        {!!correctionBadge && (
+                            <View style={{ flexDirection: "row", marginTop: 6 }}>
+                                <View
+                                    style={{
+                                        paddingHorizontal: 8,
+                                        paddingVertical: 4,
+                                        borderRadius: 999,
+                                        backgroundColor: "#FFF7ED",
+                                        borderWidth: 1,
+                                        borderColor: "#FED7AA",
+                                    }}
+                                >
+                                    <Text style={{ fontSize: 11, color: "#9A3412", fontWeight: "900" }}>
+                                        {correctionBadge}
+                                    </Text>
+                                </View>
+                            </View>
+                        )}
 
                         <View style={{ flexDirection: "row", justifyContent: "space-between", marginTop: 6 }}>
                             <Text style={{ fontSize: 13, color: "#111827", fontWeight: "700" }}>
