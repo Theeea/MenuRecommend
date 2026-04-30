@@ -217,9 +217,16 @@ export class AdminController {
   }
 
   @Get('shop/items')
-  async adminShopItems(@Headers('x-admin-key') adminKey?: string) {
+  async adminShopItems(
+    @Headers('x-admin-key') adminKey?: string,
+    @Query('status') status?: string,
+  ) {
     assertAdminKey(adminKey);
+    const s = String(status ?? 'ALL').toUpperCase();
+    const where =
+      s === 'ACTIVE' || s === 'INACTIVE' ? { status: s } : undefined;
     const items = await (this.prisma as any).shopItem.findMany({
+      ...(where ? { where } : {}),
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
     });
     return { ok: true, items };
@@ -329,10 +336,25 @@ export class AdminController {
     @Headers('x-admin-key') adminKey: string | undefined,
     @Query('status') status?: string,
     @Query('take') take?: string,
+    @Query('q') q?: string,
   ) {
     assertAdminKey(adminKey);
-    const s = String(status ?? 'REQUESTED').toUpperCase();
-    const where = s === 'ALL' ? {} : { status: s };
+    const requestedStatus = String(status ?? 'REQUESTED').toUpperCase();
+    const s = ['REQUESTED', 'SENT', 'CANCELLED', 'ALL'].includes(
+      requestedStatus,
+    )
+      ? requestedStatus
+      : 'REQUESTED';
+    const search = String(q ?? '').trim();
+    const where: any = s === 'ALL' ? {} : { status: s };
+    if (search) {
+      where.OR = [
+        { id: { contains: search, mode: 'insensitive' } },
+        { userId: { contains: search, mode: 'insensitive' } },
+        { user: { email: { contains: search, mode: 'insensitive' } } },
+        { shopItem: { name: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
     const items = await (this.prisma as any).userPurchase.findMany({
       where,
       take: clamp(toInt(take, 50), 1, 100),
@@ -393,12 +415,22 @@ export class AdminController {
     .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
     .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:12px}
     .card{background:#fff;border:1px solid #eee;border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:10px}
+    .card.inactive{opacity:.72}
+    .card.requested{border-color:#f5c542}
+    .card.sent{border-color:#9ad4ad}
+    .card.cancelled{border-color:#f0a0a0}
     .title{font-size:18px;font-weight:900}
     .muted{color:#666;font-weight:700}
     .pill{display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;background:#f1f1f1;font-weight:800;margin:2px}
+    .pill.ACTIVE,.pill.SENT,.pill.used{background:#dcfce7;color:#166534}
+    .pill.INACTIVE,.pill.CANCELLED{background:#fee2e2;color:#991b1b}
+    .pill.REQUESTED,.pill.unused{background:#fef3c7;color:#92400e}
     img.thumb{width:72px;height:72px;border-radius:14px;object-fit:cover;background:#eee}
     .formgrid{display:grid;grid-template-columns:1.2fr .8fr .7fr .7fr .7fr;gap:10px}
     .formgrid input{width:100%;box-sizing:border-box}
+    .toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between}
+    .toolbar .left,.toolbar .right{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .meta{font-size:12px;color:#666;font-weight:800}
     pre{white-space:pre-wrap;background:#fafafa;border:1px solid #eee;border-radius:12px;padding:10px;margin:0;max-height:140px;overflow:auto}
   </style>
 </head>
@@ -436,18 +468,35 @@ export class AdminController {
   </div>
 
   <div class="box">
-    <div class="row">
-      <div class="title">상품 목록</div>
-      <button class="secondary" onclick="loadItems()">새로고침</button>
+    <div class="toolbar">
+      <div class="left">
+        <div class="title">상품 목록</div>
+        <select id="itemStatus" onchange="loadItems()">
+          <option value="ALL">전체</option>
+          <option value="ACTIVE" selected>판매중</option>
+          <option value="INACTIVE">숨김</option>
+        </select>
+      </div>
+      <div class="right">
+        <span id="itemCount" class="meta"></span>
+        <button class="secondary" onclick="loadItems()">새로고침</button>
+      </div>
     </div>
     <div id="items" class="grid" style="margin-top:12px"></div>
   </div>
 
   <div class="box">
-    <div class="row">
-      <div class="title">구매 요청</div>
-      <select id="purchaseStatus"><option value="REQUESTED">발송 대기</option><option value="SENT">발송 완료</option><option value="CANCELLED">취소</option><option value="ALL">전체</option></select>
-      <button class="secondary" onclick="loadPurchases()">조회</button>
+    <div class="toolbar">
+      <div class="left">
+        <div class="title">구매 요청</div>
+        <select id="purchaseStatus" onchange="loadPurchases()"><option value="REQUESTED">발송 대기</option><option value="SENT">발송 완료</option><option value="CANCELLED">취소</option><option value="ALL">전체</option></select>
+        <select id="purchaseTake" onchange="loadPurchases()"><option value="20">20건</option><option value="50" selected>50건</option><option value="100">100건</option></select>
+        <input id="purchaseQuery" placeholder="유저/상품/구매ID 검색" onkeydown="if(event.key==='Enter') loadPurchases()"/>
+      </div>
+      <div class="right">
+        <span id="purchaseCount" class="meta"></span>
+        <button class="secondary" onclick="loadPurchases()">조회</button>
+      </div>
     </div>
     <div id="purchases" class="grid" style="margin-top:12px"></div>
   </div>
@@ -466,6 +515,18 @@ export class AdminController {
     return json || {};
   }
   function esc(s){ return String(s ?? "").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;"); }
+  function fmtDate(v){
+    if(!v) return "-";
+    const d = new Date(v);
+    if(Number.isNaN(d.getTime())) return String(v);
+    return d.toLocaleString("ko-KR", { year:"2-digit", month:"2-digit", day:"2-digit", hour:"2-digit", minute:"2-digit" });
+  }
+  function statusLabel(s){
+    return ({ ACTIVE:"판매중", INACTIVE:"숨김", REQUESTED:"발송 대기", SENT:"발송 완료", CANCELLED:"취소" })[s] || s || "-";
+  }
+  function getMeta(p){
+    return p && p.fulfillmentMeta && typeof p.fulfillmentMeta === "object" ? p.fulfillmentMeta : {};
+  }
   function itemBody(prefix){
     const id = prefix ? prefix + "-" : "";
     return {
@@ -497,12 +558,14 @@ export class AdminController {
   async function loadItems(){
     setStatus("상품 불러오는중...");
     try{
-      const data = await api("/admin/shop/items");
+      const status = document.getElementById("itemStatus").value;
+      const data = await api("/admin/shop/items?status="+encodeURIComponent(status));
       const el = document.getElementById("items");
+      document.getElementById("itemCount").textContent = (data.items||[]).length + "건";
       el.innerHTML = (data.items||[]).map(it => {
         const img = it.imageUrl ? '<img class="thumb" src="'+esc(it.imageUrl)+'"/>' : '<div class="thumb"></div>';
-        return '<div class="card">' +
-          '<div class="row">'+img+'<div><div class="title">'+esc(it.name)+'</div><div class="muted">'+esc(it.status)+' · '+esc(it.pricePoints)+'P</div></div></div>' +
+        return '<div class="card '+(it.status==="INACTIVE"?"inactive":"")+'">' +
+          '<div class="row">'+img+'<div><div class="title">'+esc(it.name)+'</div><div class="muted"><span class="pill '+esc(it.status)+'">'+esc(statusLabel(it.status))+'</span><span class="pill">'+esc(it.pricePoints)+'P</span><span class="pill">재고 '+esc(it.stock ?? '무제한')+'</span><span class="pill">순서 '+esc(it.sortOrder ?? 0)+'</span></div></div></div>' +
           '<div class="formgrid">' +
             '<input id="'+esc(it.id)+'-name" value="'+esc(it.name)+'"/>' +
             '<input id="'+esc(it.id)+'-pricePoints" type="number" value="'+esc(it.pricePoints)+'"/>' +
@@ -523,16 +586,34 @@ export class AdminController {
     setStatus("구매 요청 불러오는중...");
     try{
       const status = document.getElementById("purchaseStatus").value;
-      const data = await api("/admin/shop/purchases?status="+encodeURIComponent(status));
+      const take = document.getElementById("purchaseTake").value;
+      const q = document.getElementById("purchaseQuery").value.trim();
+      const qs = new URLSearchParams({ status, take });
+      if(q) qs.set("q", q);
+      const data = await api("/admin/shop/purchases?"+qs.toString());
       const el = document.getElementById("purchases");
+      document.getElementById("purchaseCount").textContent = (data.items||[]).length + "건";
       el.innerHTML = (data.items||[]).map(p => {
         const name = p.shopItem ? p.shopItem.name : (p.itemSnapshot && p.itemSnapshot.name) || "상품";
-        return '<div class="card">' +
+        const meta = getMeta(p);
+        const code = meta.code || "";
+        const memo = meta.memo || "";
+        const cancelReason = meta.cancelReason || "";
+        const cancelledBy = meta.cancelledBy || "";
+        const used = meta.usedByUser === true;
+        const userText = p.user ? (p.user.email || p.user.id) : p.userId;
+        const statusClass = String(p.status || "").toLowerCase();
+        const usedLine = p.status === "SENT" ? '<span class="pill '+(used ? "used" : "unused")+'">'+(used ? "사용" : "미사용")+'</span>' : '';
+        const cancelLine = cancelReason ? '<div class="muted">취소 사유: '+esc(cancelReason)+' '+(cancelledBy ? '('+esc(cancelledBy)+')' : '')+'</div>' : '';
+        const sentLine = p.status === "SENT" ? '<div class="muted">코드: <strong>'+esc(code || "코드 없음")+'</strong>'+(memo ? ' / 메모: '+esc(memo) : '')+'</div>' : '';
+        return '<div class="card '+esc(statusClass)+'">' +
           '<div class="title">'+esc(name)+'</div>' +
-          '<div class="row"><span class="pill">'+esc(p.status)+'</span><span class="pill">'+esc(p.points)+'P</span><span class="pill">'+esc(p.createdAt)+'</span></div>' +
-          '<div class="muted">user: '+esc(p.user ? p.user.email : p.userId)+' / balance: '+esc(p.user ? p.user.pointBalance : '-')+'</div>' +
-          '<div class="row"><input id="code-'+esc(p.id)+'" placeholder="교환권 코드/식별값"/><input id="memo-'+esc(p.id)+'" placeholder="발송 메모"/><button class="pass" onclick="markSent(\\''+esc(p.id)+'\\')" '+(p.status==="REQUESTED"?"":"disabled")+'>발송 완료</button><button class="fail" onclick="cancelPurchase(\\''+esc(p.id)+'\\')" '+(p.status==="REQUESTED"?"":"disabled")+'>취소/환불</button></div>' +
-          '<pre>'+esc(JSON.stringify(p.fulfillmentMeta || p.itemSnapshot || {}, null, 2))+'</pre>' +
+          '<div class="row"><span class="pill '+esc(p.status)+'">'+esc(statusLabel(p.status))+'</span>'+usedLine+'<span class="pill">'+esc(p.points)+'P</span><span class="pill">'+esc(fmtDate(p.createdAt))+'</span></div>' +
+          '<div class="muted">user: '+esc(userText)+' / balance: '+esc(p.user ? p.user.pointBalance : '-')+'</div>' +
+          sentLine +
+          cancelLine +
+          '<div class="row"><input id="code-'+esc(p.id)+'" placeholder="교환권 코드/식별값" value="'+esc(code)+'"/><input id="memo-'+esc(p.id)+'" placeholder="발송 메모" value="'+esc(memo)+'"/><button class="pass" onclick="markSent(\\''+esc(p.id)+'\\')" '+(p.status==="REQUESTED"?"":"disabled")+'>발송 완료</button><button class="fail" onclick="cancelPurchase(\\''+esc(p.id)+'\\')" '+(p.status==="REQUESTED"?"":"disabled")+'>취소/환불</button></div>' +
+          '<pre>'+esc(JSON.stringify({ id:p.id, itemSnapshot:p.itemSnapshot || null, fulfillmentMeta:p.fulfillmentMeta || null }, null, 2))+'</pre>' +
         '</div>';
       }).join("") || '<div class="muted">구매 요청이 없습니다.</div>';
       setStatus("");

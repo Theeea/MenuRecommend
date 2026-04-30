@@ -322,7 +322,11 @@
 운영 정책:
 
 - MVP에서는 구매 즉시 포인트를 차감하고, 관리자가 나중에 모바일교환권을 발송합니다.
-- 발송/취소 관리 화면은 후속 작업입니다.
+- 어드민은 `/admin/shop/page`에서 상품과 구매 요청을 관리합니다.
+- 어드민 상품 목록은 `GET /admin/shop/items?status=ALL|ACTIVE|INACTIVE`를 사용합니다.
+- 어드민 구매 목록은 `GET /admin/shop/purchases?status=REQUESTED|SENT|CANCELLED|ALL&take=50&q=검색어`를 사용합니다.
+- 어드민 발송 완료는 `POST /admin/shop/purchases/:id/sent`를 사용합니다.
+- 어드민 취소/환불은 `POST /admin/shop/purchases/:id/cancel`을 사용합니다.
 
 발송/취소 경쟁 조건:
 
