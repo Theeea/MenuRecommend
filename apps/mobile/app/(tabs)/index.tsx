@@ -38,6 +38,16 @@ type RecommendOk = {
 
 type RecommendFail = { ok: false; message: string };
 
+const CUISINE_OPTIONS = [
+    { label: "아무거나", value: "" },
+    { label: "한식", value: "KOREAN" },
+    { label: "일식", value: "JAPANESE" },
+    { label: "중식", value: "CHINESE" },
+    { label: "양식", value: "WESTERN" },
+    { label: "분식", value: "SNACK" },
+    { label: "아시아", value: "ASIAN" },
+] as const;
+
 function msToKoreanRemain(ms: number) {
     if (ms <= 0) return "0분";
     const totalMin = Math.ceil(ms / 60000);
@@ -57,6 +67,7 @@ export default function Home() {
     const [refreshing, setRefreshing] = useState(false);
 
     const [rec, setRec] = useState<RecommendOk | null>(null);
+    const [selectedCuisine, setSelectedCuisine] = useState<(typeof CUISINE_OPTIONS)[number]["value"]>("");
 
     // ✅ 인증 가능 여부(쿨타임/일일 제한)
     const [proofQuota, setProofQuota] = useState<ProofQuota | null>(null);
@@ -114,7 +125,8 @@ export default function Home() {
     const recommend = useCallback(async () => {
         setLoading(true);
         try {
-            const { data } = await api.post("/recommend", {});
+            const body = selectedCuisine ? { cuisine: selectedCuisine } : {};
+            const { data } = await api.post("/recommend", body);
 
             if (data?.ok === true) {
                 await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -152,7 +164,7 @@ export default function Home() {
         } finally {
             setLoading(false);
         }
-    }, [loadQuota, router]);
+    }, [loadQuota, router, selectedCuisine]);
 
     const accept = useCallback(async () => {
         if (!rec) return;
@@ -379,6 +391,38 @@ export default function Home() {
                 >
                     <Text style={{ fontSize: 16, fontWeight: "900", color: "#111" }}>추천 메뉴</Text>
                     <View style={{ height: 10 }} />
+
+                    <Text style={{ color: "#555", fontWeight: "800" }}>먹고 싶은 종류</Text>
+                    <View style={{ height: 8 }} />
+                    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                        {CUISINE_OPTIONS.map((option) => {
+                            const active = selectedCuisine === option.value;
+                            return (
+                                <Pressable
+                                    key={option.value || "ALL"}
+                                    onPress={async () => {
+                                        await Haptics.selectionAsync();
+                                        setSelectedCuisine(option.value);
+                                        if (rec?.session.status !== "ACCEPTED") {
+                                            setRec(null);
+                                        }
+                                    }}
+                                    style={{
+                                        paddingHorizontal: 12,
+                                        paddingVertical: 9,
+                                        borderRadius: 999,
+                                        backgroundColor: active ? "#111" : "#F4F4F4",
+                                        borderWidth: 1,
+                                        borderColor: active ? "#111" : "#E7E7E7",
+                                    }}
+                                >
+                                    <Text style={{ color: active ? "#FFF" : "#111", fontWeight: "900" }}>{option.label}</Text>
+                                </Pressable>
+                            );
+                        })}
+                    </View>
+
+                    <View style={{ height: 14 }} />
 
                     {rec ? (
                         <>
