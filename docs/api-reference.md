@@ -295,7 +295,10 @@
 
 - `action`: `ALL` 또는 액션명
 - `targetType`: `ALL` 또는 `ShopItem`, `UserPurchase`, `Proof`, `User`, `MenuDraft`
+- `targetId`: 대상 ID
 - `userId`: 유저 ID 검색
+- `from`: 시작일. `YYYY-MM-DD`면 KST 00:00 기준
+- `to`: 종료일. `YYYY-MM-DD`면 KST 다음날 00:00 미만 기준
 - `take`: 조회 개수
 
 주요 액션:

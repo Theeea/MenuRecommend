@@ -466,17 +466,24 @@ export class AdminController {
     @Headers('x-admin-key') adminKey: string | undefined,
     @Query('action') action?: string,
     @Query('targetType') targetType?: string,
+    @Query('targetId') targetId?: string,
     @Query('userId') userId?: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
     @Query('take') take?: string,
   ) {
     assertAdminKey(adminKey);
     const where: any = {};
     const a = String(action ?? '').trim();
     const tt = String(targetType ?? '').trim();
+    const tid = String(targetId ?? '').trim();
     const uid = String(userId ?? '').trim();
+    const createdAt = parseKstRange(from, to);
     if (a && a !== 'ALL') where.action = a;
     if (tt && tt !== 'ALL') where.targetType = tt;
+    if (tid) where.targetId = tid;
     if (uid) where.userId = uid;
+    if (createdAt) where.createdAt = createdAt;
 
     const items = await (this.prisma as any).auditLog.findMany({
       where,
@@ -573,6 +580,9 @@ export class AdminController {
         <option value="MenuDraft">메뉴 초안</option>
       </select>
       <input id="userId" placeholder="userId"/>
+      <input id="targetId" placeholder="targetId"/>
+      <label class="muted">From</label><input id="from" type="date"/>
+      <label class="muted">To</label><input id="to" type="date"/>
       <select id="take"><option value="50">50건</option><option value="100">100건</option><option value="200">200건</option></select>
       </div>
       <button onclick="loadLogs()">조회</button>
@@ -675,7 +685,13 @@ export class AdminController {
         take: document.getElementById("take").value
       });
       const userId = document.getElementById("userId").value.trim();
+      const targetId = document.getElementById("targetId").value.trim();
+      const from = document.getElementById("from").value;
+      const to = document.getElementById("to").value;
       if(userId) qs.set("userId", userId);
+      if(targetId) qs.set("targetId", targetId);
+      if(from) qs.set("from", from);
+      if(to) qs.set("to", to);
       const data = await api("/admin/audit-logs?" + qs.toString());
       const items = data.items || [];
       renderSummary(items);

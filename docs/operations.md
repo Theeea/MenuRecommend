@@ -147,6 +147,12 @@ API:
 curl --silent --show-error --request GET http://localhost:3000/admin/audit-logs -H "x-admin-key: <ADMIN_REVIEW_KEY>"
 ```
 
+특정 대상/기간 확인:
+
+```bash
+curl --silent --show-error --request GET "http://localhost:3000/admin/audit-logs?targetType=Proof&targetId=<proofId>&from=2026-05-01&to=2026-05-06" -H "x-admin-key: <ADMIN_REVIEW_KEY>"
+```
+
 확인할 대표 액션:
 
 - `SHOP_PURCHASE_REQUESTED`
