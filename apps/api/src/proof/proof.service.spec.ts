@@ -542,6 +542,24 @@ describe('ProofService.reviewByAdminKey', () => {
       where: { id: 'session-1' },
       data: { status: 'DONE', doneAt: expect.any(Date) },
     });
+    expect(mock.tx.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorType: 'ADMIN',
+        actorId: null,
+        action: 'PROOF_REVIEWED',
+        targetType: 'Proof',
+        targetId: 'proof-1',
+        userId: 'user-1',
+        metadata: expect.objectContaining({
+          result: 'PASS',
+          score: 92,
+          pointDelta: 40,
+          balanceAfter: 160,
+          sessionId: 'session-1',
+          model: 'admin',
+        }),
+      },
+    });
   });
 
   it('does not award points again when the proof reward dedupeKey already exists', async () => {
@@ -596,6 +614,21 @@ describe('ProofService.reviewByAdminKey', () => {
       where: { id: 'session-1' },
       data: { status: 'DONE', doneAt: expect.any(Date) },
     });
+    expect(mock.tx.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actorType: 'ADMIN',
+        action: 'PROOF_REVIEWED',
+        targetType: 'Proof',
+        targetId: 'proof-1',
+        userId: 'user-1',
+        metadata: expect.objectContaining({
+          result: 'PASS',
+          pointDelta: 0,
+          balanceAfter: 160,
+          sessionId: 'session-1',
+        }),
+      }),
+    });
   });
 
   it('returns alreadyFinal without opening a transaction for a final proof', async () => {
@@ -616,6 +649,7 @@ describe('ProofService.reviewByAdminKey', () => {
       service.reviewByAdminKey('admin-secret', 'proof-1', { result: 'PASS' }),
     ).resolves.toEqual({ ok: true, alreadyFinal: true, proof });
     expect(mock.prisma.$transaction).not.toHaveBeenCalled();
+    expect(mock.tx.auditLog.create).not.toHaveBeenCalled();
   });
 
   it('marks the session DONE without awarding points when admin rejects a proof', async () => {
@@ -659,6 +693,24 @@ describe('ProofService.reviewByAdminKey', () => {
     expect(mock.tx.recommendSession.update).toHaveBeenCalledWith({
       where: { id: 'session-1' },
       data: { status: 'DONE', doneAt: expect.any(Date) },
+    });
+    expect(mock.tx.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorType: 'ADMIN',
+        actorId: null,
+        action: 'PROOF_REVIEWED',
+        targetType: 'Proof',
+        targetId: 'proof-1',
+        userId: 'user-1',
+        metadata: expect.objectContaining({
+          result: 'FAIL',
+          score: 15,
+          pointDelta: 0,
+          balanceAfter: null,
+          sessionId: 'session-1',
+          model: 'admin',
+        }),
+      },
     });
   });
 });
@@ -757,6 +809,25 @@ describe('ProofService.correctReviewByAdminKey', () => {
         }),
       }),
     );
+    expect(mock.tx.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorType: 'ADMIN',
+        actorId: null,
+        action: 'PROOF_REVIEW_CORRECTED',
+        targetType: 'Proof',
+        targetId: 'proof-1',
+        userId: 'user-1',
+        metadata: expect.objectContaining({
+          from: 'PASS',
+          to: 'FAIL',
+          reason: '검색 이미지로 확인됨',
+          sequence: 1,
+          pointDelta: -40,
+          balanceAfter: 120,
+          sessionId: 'session-1',
+        }),
+      },
+    });
   });
 
   it('corrects FAIL to PASS and creates a positive admin adjustment ledger', async () => {
@@ -845,6 +916,25 @@ describe('ProofService.correctReviewByAdminKey', () => {
         }),
       }),
     );
+    expect(mock.tx.auditLog.create).toHaveBeenCalledWith({
+      data: {
+        actorType: 'ADMIN',
+        actorId: null,
+        action: 'PROOF_REVIEW_CORRECTED',
+        targetType: 'Proof',
+        targetId: 'proof-1',
+        userId: 'user-1',
+        metadata: expect.objectContaining({
+          from: 'FAIL',
+          to: 'PASS',
+          reason: '실제 촬영 사진으로 확인됨',
+          sequence: 2,
+          pointDelta: 40,
+          balanceAfter: 160,
+          sessionId: 'session-1',
+        }),
+      },
+    });
   });
 
   it('requires a reason and only corrects final PASS/FAIL proofs', async () => {
@@ -873,6 +963,31 @@ describe('ProofService.correctReviewByAdminKey', () => {
       }),
     ).rejects.toBeInstanceOf(BadRequestException);
     expect(mock.prisma.$transaction).not.toHaveBeenCalled();
+    expect(mock.tx.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('returns unchanged without adding an audit log when correction result is the current final state', async () => {
+    process.env.ADMIN_REVIEW_KEY = 'admin-secret';
+
+    const mock = createPrismaMock();
+    const service = makeService(mock);
+    const proof = {
+      id: 'proof-1',
+      sessionId: 'session-1',
+      aiResult: ProofResult.PASS,
+      session: baseSession({ status: 'DONE' }),
+    };
+
+    mock.prisma.proof.findUnique.mockResolvedValue(proof);
+
+    await expect(
+      service.correctReviewByAdminKey('admin-secret', 'proof-1', {
+        result: 'PASS',
+        reason: '이미 승인 상태 확인',
+      }),
+    ).resolves.toEqual({ ok: true, unchanged: true, proof });
+    expect(mock.prisma.$transaction).not.toHaveBeenCalled();
+    expect(mock.tx.auditLog.create).not.toHaveBeenCalled();
   });
 });
 
