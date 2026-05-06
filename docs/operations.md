@@ -52,11 +52,23 @@ migrate:
 pnpm --filter api prisma:migrate
 ```
 
+deploy:
+
+```bash
+pnpm --filter api prisma:deploy
+```
+
 status:
 
 ```bash
 pnpm --filter api prisma:status
 ```
+
+주의:
+
+- `AuditLog`, `ShopItem`, `UserPurchase` 같은 신규 테이블이 추가된 뒤에는 DB가 켜진 상태에서 migration 적용 여부를 확인합니다.
+- `P1001 Can't reach database server at localhost:5432`가 나오면 PostgreSQL이 실행 중인지 먼저 확인합니다.
+- schema를 바꾼 뒤에는 `pnpm --filter api prisma:generate`를 실행합니다.
 
 ## Mobile
 
@@ -120,3 +132,28 @@ git status --short
 rg -n "createQueued|processPendingBatch|proof-status|me/proofs" apps/api/src
 rg -n "rawUrl|imageUrl|blocked|proofPointsText" apps/mobile/app
 ```
+
+## 감사로그 확인
+
+어드민 화면:
+
+```text
+GET /admin/audit/page
+```
+
+API:
+
+```bash
+curl --silent --show-error --request GET http://localhost:3000/admin/audit-logs -H "x-admin-key: <ADMIN_REVIEW_KEY>"
+```
+
+확인할 대표 액션:
+
+- `SHOP_PURCHASE_REQUESTED`
+- `SHOP_PURCHASE_SENT`
+- `SHOP_PURCHASE_CANCELLED`
+- `PROOF_REVIEWED`
+- `PROOF_REVIEW_CORRECTED`
+- `POINTS_ADJUSTED`
+- `MENU_DRAFT_APPROVED`
+- `MENU_DRAFT_REJECTED`

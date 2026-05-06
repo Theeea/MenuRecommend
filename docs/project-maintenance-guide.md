@@ -500,30 +500,32 @@ query string으로 관리자 키를 받는 코드를 추가하지 않습니다.
 - 차단 메뉴 CRUD
 - 추천 쿼리에서 차단 메뉴 제외
 - 서버 Proof 정책: pending/hold 차단, 쿨타임, 일일 제한
+- 포인트 사용 MVP: 상품 목록, 구매 요청, 구매내역, 취소/환불, 교환권 사용/미사용 표시
+- 어드민 Shop 관리: 상품 등록/수정/숨김, 구매 요청 발송/취소
+- AuditLog: Shop, Proof 리뷰/정정, 포인트 수동 조정, 메뉴 초안 승인/거절
 
 추가 개선 항목:
 
 - 모바일 변경 후 전체 타입체크 통과 유지
 - 어드민 HOLD 필터와 사유 배지 개선
 - 운영 worker 방식 결정: OS cron, node-cron, BullMQ
-- 어드민 리뷰 및 포인트 조정 audit log 추가
 - 운영 전 업로드 보안 강화:
   - signed URL 또는 인증 proxy 검토
   - 정적 서빙 범위 제한
   - 업로드 실패 cleanup 로그
-- MVP 이후 포인트 사용 기능:
-  - `GET /shop/items`
-  - `POST /shop/purchase`
-  - `GET /me/purchases`
+- 포인트 사용 고도화:
+  - 상품 이미지 파일 업로드 또는 S3 연동
+  - 구매내역 페이지네이션
+  - 교환권 실제 바코드/QR 렌더링
 
 ## 14. 다음 유지보수 추천 순서
 
-1. `ProofService.createQueued` 단위 테스트 추가
-2. Proof 포인트 중복 지급 방지 테스트 추가
-3. 어드민 리뷰 audit log 추가
-4. Proof worker retry/max attempts 정책 추가
-5. 운영 cron 또는 queue 방식 결정
-6. 업로드 검증과 raw 이미지 접근 정책 강화
+1. ProofService audit log 기대값 테스트 보강
+2. Proof worker retry/max attempts 정책 추가
+3. 운영 cron 또는 queue 방식 결정
+4. 업로드 검증과 raw 이미지 접근 정책 강화
+5. Shop 상품 이미지 업로드 또는 S3 연동
+6. AuditLog 날짜 필터와 targetId 검색 추가
 
 ## 15. 빠른 디버깅 가이드
 

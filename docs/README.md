@@ -16,7 +16,7 @@
 - [DB와 Prisma 주의사항](database.md): schema 기준, 없는 필드, generated client import
 - [Proof 인증 플로우](proof-flow.md): 업로드, 큐잉, AI worker, 상태 전이
 - [모바일 앱 가이드](mobile-guide.md): 화면별 책임, raw 이미지 표시, 토큰 주의사항
-- [어드민 리뷰 가이드](admin-guide.md): 어드민 리뷰 화면, 관리자 키, 이미지 정책
+- [어드민 리뷰 가이드](admin-guide.md): 어드민 리뷰, Shop 관리, 감사로그 화면, 관리자 키, 이미지 정책
 - [포인트 정책](points-policy.md): 지급 조건, ledger, dedupeKey
 - [차단 메뉴 정책](blocked-menus.md): `/me/blocked-menus`, 추천 제외 정책
 - [업로드 보안 정책](upload-security.md): proof 이미지 업로드 제한, 저장 방식, QR payload
@@ -30,3 +30,4 @@
 - 업로드 정책을 바꾸면 [업로드 보안 정책](upload-security.md)을 갱신합니다.
 - 모바일 UX를 바꾸면 [모바일 앱 가이드](mobile-guide.md)를 갱신합니다.
 - 운영 명령이나 환경변수가 바뀌면 [로컬 실행과 검증](operations.md)을 갱신합니다.
+- 관리자/포인트/구매 감사로그 정책이 바뀌면 [어드민 리뷰 가이드](admin-guide.md), [포인트 정책](points-policy.md), [API 명세와 라우트](api-reference.md)를 함께 갱신합니다.

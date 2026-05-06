@@ -115,7 +115,29 @@ query param으로 관리자 키를 추가하지 않습니다.
 - 모바일 화면 흐름 변경
 - 운영 명령 변경
 
-## 12. enum/상태 라벨은 공통 패키지 기준
+## 12. 운영 액션은 감사로그를 남긴다
+
+포인트, 구매, 인증 판정, 메뉴 초안처럼 운영상 추적이 필요한 액션은 `AuditLog`에 기록합니다.
+
+대표 액션:
+
+- `PROOF_REVIEWED`
+- `PROOF_REVIEW_CORRECTED`
+- `POINTS_ADJUSTED`
+- `SHOP_PURCHASE_REQUESTED`
+- `SHOP_PURCHASE_SENT`
+- `SHOP_PURCHASE_CANCELLED`
+- `SHOP_PURCHASE_USED_TOGGLED`
+- `MENU_DRAFT_APPROVED`
+- `MENU_DRAFT_REJECTED`
+
+원칙:
+
+- 상태 변경과 감사로그 기록은 가능한 한 같은 트랜잭션 안에서 처리합니다.
+- `PointLedger`는 잔액 변동 원장이고, `AuditLog`는 운영 추적 로그입니다.
+- 관리자 키는 감사로그 조회에서도 `x-admin-key` 헤더만 사용합니다.
+
+## 13. enum/상태 라벨은 공통 패키지 기준
 
 모바일과 어드민에서 enum 값을 사용자에게 직접 노출하지 않습니다.
 표시 문구는 `packages/shared`의 라벨 맵과 헬퍼 함수를 사용합니다.
